@@ -1,5 +1,4 @@
 mod model_creation;
-mod scylla_helper;
 
 pub mod scylladb;
 

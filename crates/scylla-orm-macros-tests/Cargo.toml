@@ -1,0 +1,17 @@
+[package]
+name = "scylla-orm-macros-tests"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = false
+repository = "https://github.com/yiwen-ai/writing"
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+scylla-orm = { path = "../scylla-orm" }
+scylla-orm-macros = { path = "../scylla-orm-macros" }
+isolang = { workspace = true }
+xid = { workspace = true }

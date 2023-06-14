@@ -170,6 +170,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bytes",
+ "ciborium",
+ "ciborium-io",
+ "libflate",
+ "log",
+ "mime",
+ "serde",
+ "serde_json",
+ "structured-logger",
+ "tokio",
+ "uuid",
+ "zstd 0.12.3+zstd.1.5.2",
+]
+
+[[package]]
 name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -796,7 +817,7 @@ checksum = "12b6ee2129af8d4fb011108c73d99a1b83a85977f23b82460c0ae2e25bb4b57f"
 [[package]]
 name = "isolang"
 version = "2.3.0"
-source = "git+https://github.com/yiwen-ai/isolang-rs.git?branch=master#a150565753def89129fb9be91f72f348a084cef7"
+source = "git+https://github.com/yiwen-ai/isolang-rs.git?branch=master#a3c7a91fe06e4962641271a649a303ab2b1271df"
 dependencies = [
  "phf",
 ]
@@ -1560,6 +1581,37 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "scylla-orm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ciborium",
+ "isolang",
+ "scylla",
+ "serde",
+ "xid",
+]
+
+[[package]]
+name = "scylla-orm-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.18",
+]
+
+[[package]]
+name = "scylla-orm-macros-tests"
+version = "0.1.0"
+dependencies = [
+ "isolang",
+ "scylla-orm",
+ "scylla-orm-macros",
+ "xid",
 ]
 
 [[package]]
@@ -2540,6 +2592,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "axum-web",
  "bytes",
  "ciborium",
  "ciborium-io",
@@ -2550,6 +2603,7 @@ dependencies = [
  "mime",
  "reqwest",
  "scylla",
+ "scylla-orm",
  "serde",
  "serde_json",
  "structured-logger",
@@ -2565,7 +2619,7 @@ dependencies = [
 [[package]]
 name = "xid"
 version = "1.0.3"
-source = "git+https://github.com/yiwen-ai/xid-rs.git?branch=main#6071e0f4033ba4ed07d9ecbfb777da5870baf92d"
+source = "git+https://github.com/yiwen-ai/xid-rs.git?branch=main#2cfbb0fc244c813ef3d41d9e96c2b8228aec7825"
 dependencies = [
  "crc32fast",
  "hostname",

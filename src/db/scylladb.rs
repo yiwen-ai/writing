@@ -1,6 +1,5 @@
 use scylla::{
-    cql_to_rust::{FromCqlVal, FromCqlValError},
-    frame::response::result::Row,
+    cql_to_rust::{FromCqlValError},
     frame::value::ValueList,
     statement::{prepared_statement::PreparedStatement, Consistency, SerialConsistency},
     transport::{
@@ -9,10 +8,9 @@ use scylla::{
     },
     Metrics, Session, SessionBuilder,
 };
-use serde::{de::DeserializeOwned, Serialize};
+
 
 use std::{
-    collections::{btree_map::Iter, BTreeMap},
     sync::Arc,
     time::Duration,
 };
@@ -22,7 +20,7 @@ pub use scylla::{
     query::Query,
 };
 
-pub use super::scylla_helper::{Ascii, ColumnsMap, CqlValueSerder};
+pub use scylla_orm::{Ascii, ColumnsMap, CqlValueSerder};
 
 use crate::conf;
 use crate::erring::HTTPError;
