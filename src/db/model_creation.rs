@@ -1,10 +1,9 @@
-use ciborium::cbor;
 use std::collections::HashSet;
 
-use super::{scylladb, scylladb::CqlValue, ToAnyhowError};
+use super::{scylladb, scylladb::CqlValue};
+use isolang::Language;
+use scylla_orm::ColumnsMap;
 use scylla_orm_macros::CqlOrm;
-
-pub use isolang::Language;
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct Creation {
@@ -56,13 +55,10 @@ impl Creation {
             fields.join(",")
         );
         let params = (self.id.as_bytes(),);
-        let res = db.execute(query, params).await?.single_row();
+        let res = db.execute(query, params).await?.single_row()?;
 
-        if let Err(err) = res {
-            return Err(err.to_anyhow_error());
-        }
-        let mut cols = scylladb::ColumnsMap::with_capacity(fields.len());
-        cols.fill(res.unwrap(), fields)?;
+        let mut cols = ColumnsMap::with_capacity(fields.len());
+        cols.fill(res, fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -82,7 +78,7 @@ impl Creation {
         }
 
         let query = format!(
-            "INSERT INTO creation ({}) VALUES ({}) USING TTL 0",
+            "INSERT INTO creation ({}) VALUES ({}) IF NOT EXISTS USING TTL 0",
             cols_name.join(","),
             vals_name.join(",")
         );
@@ -95,6 +91,7 @@ impl Creation {
 
 #[cfg(test)]
 mod tests {
+    use ciborium::cbor;
     use std::str::FromStr;
     use tokio::sync::OnceCell;
 
@@ -133,13 +130,14 @@ mod tests {
 
         let res = doc.get_one(db, vec![]).await;
         assert!(res.is_err());
-        assert_eq!(erring::HTTPError::from(res.unwrap_err()).code, 404);
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 404);
 
         doc.save(db).await.unwrap();
 
         let mut doc2 = Creation::with_pk(did);
         doc2.get_one(db, vec![]).await.unwrap();
-        println!("doc: {:#?}", doc2);
+        // println!("doc: {:#?}", doc2);
 
         assert_eq!(doc2.title.as_str(), "Hello World");
         assert_eq!(doc2.version, 1);
@@ -154,6 +152,6 @@ mod tests {
         assert_eq!(doc3.language, Language::default());
         assert!(doc3.content.is_empty());
 
-        println!("doc: {:#?}", doc3);
+        // println!("doc: {:#?}", doc3);
     }
 }

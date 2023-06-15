@@ -1,19 +1,11 @@
 use scylla::{
-    cql_to_rust::{FromCqlValError},
     frame::value::ValueList,
     statement::{prepared_statement::PreparedStatement, Consistency, SerialConsistency},
-    transport::{
-        errors::QueryError, query_result::QueryResult, query_result::SingleRowError, Compression,
-        ExecutionProfile,
-    },
+    transport::{query_result::QueryResult, Compression, ExecutionProfile},
     Metrics, Session, SessionBuilder,
 };
 
-
-use std::{
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
     frame::response::result::{ColumnType, CqlValue},
@@ -23,9 +15,6 @@ pub use scylla::{
 pub use scylla_orm::{Ascii, ColumnsMap, CqlValueSerder};
 
 use crate::conf;
-use crate::erring::HTTPError;
-
-use super::ToAnyhowError;
 
 pub struct ScyllaDB {
     session: Session,
@@ -67,47 +56,7 @@ impl ScyllaDB {
         let mut prepared: PreparedStatement = self.session.prepare(query).await?;
 
         prepared.set_consistency(Consistency::One);
-        match self.session.execute(&prepared, params).await {
-            Ok(result) => Ok(result),
-            Err(err) => Err(err.to_anyhow_error()),
-        }
-    }
-}
-
-// TODO https://docs.rs/scylla/latest/scylla/transport/errors/enum.QueryError.html
-impl ToAnyhowError for QueryError {
-    fn to_anyhow_error(self) -> anyhow::Error {
-        match self {
-            QueryError::DbError(dberr, msg) => anyhow::Error::new(HTTPError {
-                code: 500,
-                message: msg,
-                data: Some(serde_json::Value::String(dberr.to_string())),
-            }),
-            _ => anyhow::Error::new(HTTPError {
-                code: 500,
-                message: self.to_string(),
-                data: None,
-            }),
-        }
-    }
-}
-
-impl ToAnyhowError for SingleRowError {
-    fn to_anyhow_error(self) -> anyhow::Error {
-        anyhow::Error::new(HTTPError {
-            code: 404,
-            message: self.to_string(),
-            data: None,
-        })
-    }
-}
-
-impl ToAnyhowError for FromCqlValError {
-    fn to_anyhow_error(self) -> anyhow::Error {
-        anyhow::Error::new(HTTPError {
-            code: 422,
-            message: self.to_string(),
-            data: None,
-        })
+        let res = self.session.execute(&prepared, params).await?;
+        Ok(res)
     }
 }

@@ -3,8 +3,10 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use scylla::transport::query_result::SingleRowError;
 use serde::Serialize;
-use std::{error::Error, fmt, fmt::Debug};
+use std::{convert::From, error::Error, fmt, fmt::Debug};
+use validator::{ValidationError, ValidationErrors};
 
 /// ErrorResponse is the response body for error.
 #[derive(Serialize)]
@@ -50,15 +52,48 @@ impl IntoResponse for HTTPError {
     }
 }
 
-impl HTTPError {
-    pub fn from(err: anyhow::Error) -> Self {
-        match err.downcast::<HTTPError>() {
+// impl From<HTTPError> for anyhow::Error {
+//     fn from(err: HTTPError) -> Self {
+//         anyhow::Error::new(err)
+//     }
+// }
+
+impl From<anyhow::Error> for HTTPError {
+    fn from(err: anyhow::Error) -> Self {
+        match err.downcast::<Self>() {
             Ok(err) => err,
-            Err(err) => Self {
-                code: 500,
-                message: err.to_string(),
-                data: None,
+            Err(sel) => match sel.downcast::<SingleRowError>() {
+                Ok(err) => HTTPError {
+                    code: 404,
+                    message: format!("{:?}", err),
+                    data: None,
+                },
+                Err(sel) => HTTPError {
+                    code: 500,
+                    message: format!("{:?}", sel),
+                    data: None,
+                },
             },
+        }
+    }
+}
+
+impl From<ValidationError> for HTTPError {
+    fn from(err: ValidationError) -> Self {
+        HTTPError {
+            code: 400,
+            message: format!("{:?}", err),
+            data: None,
+        }
+    }
+}
+
+impl From<ValidationErrors> for HTTPError {
+    fn from(err: ValidationErrors) -> Self {
+        HTTPError {
+            code: 400,
+            message: format!("{:?}", err),
+            data: None,
         }
     }
 }

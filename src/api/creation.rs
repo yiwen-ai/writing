@@ -27,16 +27,16 @@ pub struct CreateCreationInput {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CreationOutput {
-    pub id: String,
-    pub gid: String,
+    pub id: Vec<u8>,
+    pub gid: Vec<u8>,
     pub status: i8,
     pub rating: i8,
     pub version: i16,
     pub language: String,
-    pub creator: String,
+    pub creator: Vec<u8>,
     pub created_at: i64,
     pub updated_at: i64,
-    pub active_langs: Vec<String>,
+    pub active_languages: Vec<String>,
     pub original_url: String,
     pub genre: Vec<String>,
     pub title: String,
@@ -45,25 +45,25 @@ pub struct CreationOutput {
     pub keywords: Vec<String>,
     pub labels: Vec<String>,
     pub authors: Vec<String>,
-    pub reviewers: Vec<String>,
+    pub reviewers: Vec<Vec<u8>>,
     pub summary: String,
     pub content: Vec<u8>,
     pub license: String,
 }
 
-impl From<db::Creation> for CreationOutput {
+impl<'a> From<db::Creation> for CreationOutput {
     fn from(val: db::Creation) -> Self {
         Self {
-            id: val.id.to_string(),
-            gid: val.gid.to_string(),
+            id: val.id.as_bytes().to_vec(),
+            gid: val.gid.as_bytes().to_vec(),
             status: val.status,
             rating: val.rating,
             version: val.version,
             language: val.language.to_name().to_string(),
-            creator: val.creator.to_string(),
+            creator: val.creator.as_bytes().to_vec(),
             created_at: val.created_at,
             updated_at: val.updated_at,
-            active_langs: val
+            active_languages: val
                 .active_languages
                 .iter()
                 .map(|l| l.to_name().to_string())
@@ -76,7 +76,11 @@ impl From<db::Creation> for CreationOutput {
             keywords: val.keywords,
             labels: val.labels,
             authors: val.authors,
-            reviewers: val.reviewers.iter().map(|r| r.to_string()).collect(),
+            reviewers: val
+                .reviewers
+                .iter()
+                .map(|r| r.as_bytes().to_vec())
+                .collect(),
             summary: val.summary,
             content: val.content,
             license: val.license,
@@ -88,13 +92,7 @@ pub async fn create_creation(
     State(_app): State<Arc<AppState>>,
     Object(ct, input): Object<CreateCreationInput>,
 ) -> Result<Object<SuccessResponse<CreationOutput>>, HTTPError> {
-    if let Err(err) = input.validate() {
-        return Err(HTTPError {
-            code: 400,
-            message: format!("{:?}", err),
-            data: None,
-        });
-    }
+    input.validate()?;
 
     let obj = db::Creation {
         id: xid::new(),

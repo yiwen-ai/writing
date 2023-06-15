@@ -182,11 +182,14 @@ dependencies = [
  "libflate",
  "log",
  "mime",
+ "scylla",
  "serde",
  "serde_json",
  "structured-logger",
  "tokio",
  "uuid",
+ "validator",
+ "xid",
  "zstd 0.12.3+zstd.1.5.2",
 ]
 

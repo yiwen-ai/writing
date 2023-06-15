@@ -20,9 +20,12 @@ ciborium-io = { workspace = true }
 libflate = { workspace = true }
 log = { workspace = true }
 mime = { workspace = true }
+scylla = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 structured-logger = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+validator = { workspace = true }
+xid = { workspace = true }
 zstd = { workspace = true }

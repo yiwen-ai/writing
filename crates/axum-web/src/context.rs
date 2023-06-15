@@ -1,28 +1,28 @@
 use axum::{
-    http::{HeaderMap, Request},
+    http::{HeaderMap, Request, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use serde_json::Value;
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 pub use structured_logger::unix_ms;
 
 pub struct ReqContext {
-    pub rid: String,  // from x-request-id header
-    pub user: String, // from x-user-id header
+    pub rid: String,   // from x-request-id header
+    pub user: xid::Id, // from x-user-id header
     pub unix_ms: u64,
     pub start: Instant,
     pub kv: RwLock<BTreeMap<String, Value>>,
 }
 
 impl ReqContext {
-    pub fn new(rid: &str, user: &str) -> Self {
+    pub fn new(rid: &str, user: xid::Id) -> Self {
         Self {
             rid: rid.to_string(),
-            user: user.to_string(),
+            user,
             unix_ms: unix_ms(),
             start: Instant::now(),
             kv: RwLock::new(BTreeMap::new()),
@@ -40,8 +40,18 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let uri = req.uri().to_string();
     let rid = extract_header(req.headers(), "x-request-id", || Uuid::new_v4().to_string());
     let user = extract_header(req.headers(), "x-user-id", || "".to_string());
+    let uid = match xid::Id::from_str(&user) {
+        Ok(id) => id,
+        Err(err) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                format!("invalid x-user-id, {}", err),
+            )
+                .into_response()
+        }
+    };
 
-    let ctx = Arc::new(ReqContext::new(&rid, &user));
+    let ctx = Arc::new(ReqContext::new(&rid, uid));
     req.extensions_mut().insert(ctx.clone());
 
     let res = next.run(req).await;

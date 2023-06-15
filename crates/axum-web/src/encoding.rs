@@ -1,4 +1,4 @@
- use axum::http::header;
+use axum::http::header;
 use libflate::gzip::{Decoder, Encoder};
 use std::{io, string::ToString};
 
@@ -24,10 +24,7 @@ impl ToString for Encoding {
 
 impl Encoding {
     pub fn identity(&self) -> bool {
-        match self {
-            Self::Identity => true,
-            _ => false,
-        }
+        matches!(self, Self::Identity)
     }
 
     pub fn from_header_value(val: Option<&header::HeaderValue>) -> Self {
