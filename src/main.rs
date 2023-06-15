@@ -2,9 +2,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 use axum::{http::header::HeaderName, middleware, routing::get, routing::post, Router};
 use structured_logger::{async_json::new_writer, Builder};
-use tokio::{
-    io, signal,
-};
+use tokio::{io, signal};
 use tower::ServiceBuilder;
 use tower_http::{
     catch_panic::CatchPanicLayer, compression::CompressionLayer,
@@ -49,7 +47,11 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(api::version))
         .route("/healthz", get(api::healthz))
-        .route("/v1/creation", post(api::creation::create_creation))
+        .route(
+            "/v1/creation",
+            post(api::creation::create_creation).get(api::creation::get_creation),
+        )
+        .route("/v1/creation:list", post(api::creation::list_creation))
         .route_layer(mds)
         .with_state(app_state.clone());
 

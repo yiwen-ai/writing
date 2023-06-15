@@ -1,10 +1,10 @@
 use axum::extract::State;
+
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
-use validator::{ValidationError};
+use validator::ValidationError;
 
 use crate::db;
-
 
 use crate::object::{Object, ObjectType};
 
@@ -19,6 +19,26 @@ pub fn validate_xid(id: &str) -> Result<(), ValidationError> {
     let _ = xid::Id::from_str(id).map_err(|er| ValidationError {
         code: Cow::from("xid"),
         message: Some(Cow::from(format!("invalid xid: {}, {:?}", id, er))),
+        params: HashMap::new(),
+    })?;
+
+    Ok(())
+}
+
+pub fn validate_language(lang: &str) -> Result<(), ValidationError> {
+    let _ = isolang::Language::from_str(lang).map_err(|er| ValidationError {
+        code: Cow::from("isolang"),
+        message: Some(Cow::from(format!("invalid language: {}, {:?}", lang, er))),
+        params: HashMap::new(),
+    })?;
+
+    Ok(())
+}
+
+pub fn validate_cbor(data: &[u8]) -> Result<(), ValidationError> {
+    let _: ciborium::Value = ciborium::from_reader(&data[..]).map_err(|er| ValidationError {
+        code: Cow::from("cbor"),
+        message: Some(Cow::from(format!("invalid CBOR data, {:?}", er))),
         params: HashMap::new(),
     })?;
 

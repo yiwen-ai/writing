@@ -2601,6 +2601,7 @@ dependencies = [
  "ciborium",
  "ciborium-io",
  "config",
+ "futures",
  "isolang",
  "libflate",
  "log",

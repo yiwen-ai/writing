@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS writing.publication_draft (
     pid          BLOB,       -- publication id
     language     ASCII,      -- draft's language, ISO 639-3
     version      SMALLINT,   -- publication version
-    status       TINYINT,    -- int8, -2: Deleted, -1: Rejected, 0: Review, 1: Accepted
+    status       TINYINT,    -- int8, -2: Deleted, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
     model        ASCII,      -- AI model name, default to empty

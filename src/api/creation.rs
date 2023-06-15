@@ -1,27 +1,42 @@
-use axum::extract::State;
+use axum::{
+    extract::{Query, State},
+    Extension,
+};
+use isolang::Language;
 use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
 use validator::Validate;
 
+use crate::context::{unix_ms, ReqContext};
 use crate::db;
 use crate::erring::{HTTPError, SuccessResponse};
-use crate::object::Object;
+use crate::object::{Object, ObjectType};
 
-use super::{validate_xid, AppState};
+use super::{validate_cbor, validate_language, validate_xid, AppState};
 
-#[derive(Debug, Validate, Serialize, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateCreationInput {
     #[validate(length(equal = 20), custom = "validate_xid")]
     pub gid: String,
-    pub original_url: String,
+    #[validate(length(min = 2), custom = "validate_language")]
+    pub language: String,
+    #[validate(url)]
+    pub original_url: Option<String>,
+    pub genre: Option<Vec<String>>,
+    #[validate(length(min = 3, max = 512))]
     pub title: String,
-    pub description: String,
+    #[validate(length(min = 3, max = 1024))]
+    pub description: Option<String>,
+    #[validate(url)]
     pub cover: Option<String>,
-    pub content: Vec<u8>,
     pub keywords: Option<Vec<String>>,
     pub labels: Option<Vec<String>>,
     pub authors: Option<Vec<String>>,
+    #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
+    #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
+    pub content: Vec<u8>,
+    #[validate(url)]
     pub license: Option<String>,
 }
 
@@ -51,7 +66,7 @@ pub struct CreationOutput {
     pub license: String,
 }
 
-impl<'a> From<db::Creation> for CreationOutput {
+impl From<db::Creation> for CreationOutput {
     fn from(val: db::Creation) -> Self {
         Self {
             id: val.id.as_bytes().to_vec(),
@@ -89,37 +104,100 @@ impl<'a> From<db::Creation> for CreationOutput {
 }
 
 pub async fn create_creation(
-    State(_app): State<Arc<AppState>>,
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
     Object(ct, input): Object<CreateCreationInput>,
 ) -> Result<Object<SuccessResponse<CreationOutput>>, HTTPError> {
     input.validate()?;
 
-    let obj = db::Creation {
+    let now = (unix_ms() / 1000) as i64;
+    let doc = db::Creation {
         id: xid::new(),
         gid: xid::Id::from_str(&input.gid).unwrap(),
-        creator: xid::new(),
+        version: 1,
+        language: Language::from_str(&input.language).unwrap_or_default(),
+        creator: ctx.user,
+        created_at: now,
+        updated_at: now,
+        original_url: input.original_url.unwrap_or_default(),
+        genre: input.genre.unwrap_or_default(),
+        title: input.title,
+        description: input.description.unwrap_or_default(),
+        cover: input.cover.unwrap_or_default(),
+        keywords: input.keywords.unwrap_or_default(),
+        labels: input.labels.unwrap_or_default(),
+        authors: input.authors.unwrap_or_default(),
+        summary: input.summary.unwrap_or_default(),
+        content: input.content,
+        license: input.license.unwrap_or_default(),
         ..Default::default()
     };
 
-    // let did = xid_from_str(&input.did)?;
-    // let lang = normalize_lang(&input.lang);
-    // if Language::from_str(&lang).is_err() {
-    //     return Err(HTTPError {
-    //         code: 400,
-    //         message: format!("unsupported language '{}'", &lang),
-    //         data: None,
-    //     });
-    // }
+    doc.save(&app.scylla).await?;
+    ctx.set_kvs(vec![
+        ("action", "create_creation".into()),
+        ("id", doc.id.to_string().into()),
+    ])
+    .await;
+    Ok(Object(ct, SuccessResponse { result: doc.into() }))
+}
 
-    // let mut doc = db::Translating::new(did, input.version as i16, lang.clone());
-    // doc.fill(&app.scylla, vec![])
-    //     .await
-    //     .map_err(HTTPError::from)?;
+#[derive(Debug, Deserialize, Validate)]
+pub struct QueryId {
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub id: String,
+}
 
+pub async fn get_creation(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    ct: ObjectType,
+    input: Query<QueryId>,
+) -> Result<Object<SuccessResponse<CreationOutput>>, HTTPError> {
+    input.validate()?;
+    let id = xid::Id::from_str(&input.id).unwrap(); // validated
+    ctx.set_kvs(vec![
+        ("action", "get_creation".into()),
+        ("id", id.to_string().into()),
+    ])
+    .await;
+
+    let mut doc = db::Creation::with_pk(id);
+    doc.get_one(&app.scylla, Vec::new()).await?;
+    Ok(Object(ct, SuccessResponse { result: doc.into() }))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct Pagination {
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub gid: String,
+    #[validate(length(equal = 20))]
+    pub page_token: Option<String>,
+    #[validate(range(min = 5, max = 1000))]
+    pub page_size: Option<u16>,
+}
+
+pub async fn list_creation(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    Object(ct, input): Object<Pagination>,
+) -> Result<Object<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
+    input.validate()?;
+
+    // let page_token: xid::Id = input.page_token.unwrap_or_default().into()?;
+    let page_size = input.page_size.unwrap_or(10);
+    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    ctx.set_kvs(vec![
+        ("action", "list_creation".into()),
+        ("gid", gid.to_string().into()),
+    ])
+    .await;
+
+    let res = db::Creation::find(&app.scylla, gid, Vec::new(), page_size).await?;
     Ok(Object(
         ct,
         SuccessResponse {
-            result: CreationOutput::from(obj),
+            result: res.iter().map(|r| r.to_owned().into()).collect(),
         },
     ))
 }

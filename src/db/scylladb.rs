@@ -1,14 +1,14 @@
+use futures::{stream::StreamExt, Stream};
 use scylla::{
     frame::value::ValueList,
     statement::{prepared_statement::PreparedStatement, Consistency, SerialConsistency},
     transport::{query_result::QueryResult, Compression, ExecutionProfile},
     Metrics, Session, SessionBuilder,
 };
-
 use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
-    frame::response::result::{ColumnType, CqlValue},
+    frame::response::result::{ColumnType, CqlValue, Row},
     query::Query,
 };
 
@@ -58,5 +58,23 @@ impl ScyllaDB {
         prepared.set_consistency(Consistency::One);
         let res = self.session.execute(&prepared, params).await?;
         Ok(res)
+    }
+
+    pub async fn execute_iter(
+        &self,
+        query: impl Into<Query>,
+        params: impl ValueList,
+    ) -> anyhow::Result<Vec<Row>> {
+        let mut prepared: PreparedStatement = self.session.prepare(query).await?;
+
+        prepared.set_consistency(Consistency::One);
+        let mut rows_stream = self.session.execute_iter(prepared, params).await?;
+
+        let (capacity, _) = rows_stream.size_hint();
+        let mut rows: Vec<Row> = Vec::with_capacity(capacity);
+        while let Some(next_row) = rows_stream.next().await {
+            rows.push(next_row?);
+        }
+        Ok(rows)
     }
 }

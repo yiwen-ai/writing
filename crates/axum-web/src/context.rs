@@ -33,6 +33,13 @@ impl ReqContext {
         let mut kv = self.kv.write().await;
         kv.insert(key.to_string(), value);
     }
+
+    pub async fn set_kvs(&self, kvs: Vec<(&str, Value)>) {
+        let mut kv = self.kv.write().await;
+        for item in kvs {
+            kv.insert(item.0.to_string(), item.1);
+        }
+    }
 }
 
 pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {

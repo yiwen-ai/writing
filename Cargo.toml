@@ -100,6 +100,7 @@ uuid = { workspace = true }
 validator = { workspace = true }
 xid = { workspace = true }
 zstd = { workspace = true }
+futures = "0.3.28"
 
 [profile.release]
 lto = true

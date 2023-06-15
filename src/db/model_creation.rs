@@ -87,6 +87,38 @@ impl Creation {
 
         Ok(())
     }
+
+    pub async fn find(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+        select_fields: Vec<&str>,
+        page_size: u16,
+    ) -> anyhow::Result<Vec<Creation>> {
+        let fields = if select_fields.is_empty() {
+            Self::fields()
+        } else {
+            select_fields
+        };
+
+        // let fields_len = fields.len();
+        let query = format!(
+            "SELECT {} FROM creation WHERE gid=? LIMIT ?",
+            fields.clone().join(",")
+        );
+        let params = (gid.as_bytes(), page_size as i32);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Creation> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Creation::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, fields.clone())?;
+            doc.fill(&cols);
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
 }
 
 #[cfg(test)]
@@ -120,13 +152,26 @@ mod tests {
         doc.title = "Hello World".to_string();
         ciborium::into_writer(
             &cbor!({
-                "id" => "abcdef",
-                "texts" => vec!["hello world","你好，世界"],
+                "type" => "doc",
+                "content" => [{
+                    "type" => "heading",
+                    "attrs" => {
+                        "id" => "Y3T1Ik",
+                        "level" => 1u8,
+                    },
+                    "content" => [{
+                        "type" => "text",
+                        "text" => "Hello World",
+                    }],
+                }],
             })
             .unwrap(),
             &mut doc.content,
         )
         .unwrap();
+
+        // println!("doc: {:?}", doc.content);
+        // 0xa2647479706563646f6367636f6e74656e7481a364747970656768656164696e67656174747273a26269646659335431496b656c6576656c0167636f6e74656e7481a26474797065647465787464746578746b48656c6c6f20576f726c64
 
         let res = doc.get_one(db, vec![]).await;
         assert!(res.is_err());
