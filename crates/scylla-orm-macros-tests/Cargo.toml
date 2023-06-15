@@ -15,3 +15,4 @@ scylla-orm = { path = "../scylla-orm" }
 scylla-orm-macros = { path = "../scylla-orm-macros" }
 isolang = { workspace = true }
 xid = { workspace = true }
+anyhow = { workspace = true }

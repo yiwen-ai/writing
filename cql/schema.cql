@@ -7,28 +7,28 @@ CREATE KEYSPACE IF NOT EXISTS writing
 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' };
 
 CREATE TABLE IF NOT EXISTS writing.creation (
-    id           BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
-    gid          BLOB,        -- group id, creation belong to
-    status       TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Draft, 1: Review, 2: Approved
-    rating       TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
-    version      SMALLINT,    -- creation version
-    language     ASCII,       -- creation's language, ISO 639-3
-    creator      BLOB,        -- user id who create the creation.
-    created_at   BIGINT,      -- create at
-    updated_at   BIGINT,      -- update at
-    active_langs SET<ASCII>,  -- active languages by translation, ISO 639-3
-    original_url TEXT,        -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,        -- title
-    description  TEXT,        -- description
-    cover        TEXT,        -- cover url
-    keywords     LIST<TEXT>,  -- keywords
-    labels       LIST<TEXT>,  -- labels for creation management
-    authors      LIST<TEXT>,  -- authors
-    reviewers    LIST<BLOB>,  -- reviewers
-    summary      TEXT,        -- summary
-    content      BLOB,        -- content in CBOR format
-    license      TEXT,        -- license url
+    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    gid              BLOB,        -- group id, creation belong to
+    status           TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Draft, 1: Review, 2: Approved
+    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
+    version          SMALLINT,    -- creation version
+    language         ASCII,       -- creation's language, ISO 639-3
+    creator          BLOB,        -- user id who create the creation.
+    created_at       BIGINT,      -- create at
+    updated_at       BIGINT,      -- update at
+    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
+    original_url     TEXT,        -- original web url (https://xxxxxxx)
+    genre            LIST<TEXT>, -- genre
+    title            TEXT,        -- title
+    description      TEXT,        -- description
+    cover            TEXT,        -- cover url
+    keywords         LIST<TEXT>,  -- keywords
+    labels           LIST<TEXT>,  -- labels for creation management
+    authors          LIST<TEXT>,  -- authors
+    reviewers        LIST<BLOB>,  -- reviewers
+    summary          TEXT,        -- summary
+    content          BLOB,        -- content in CBOR format
+    license          TEXT,        -- license url
     PRIMARY KEY (id)
 ) WITH caching = {'enabled': 'true'}
     AND comment = 'creations'

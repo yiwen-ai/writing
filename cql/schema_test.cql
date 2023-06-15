@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS writing_test.creation (
     creator      BLOB,        -- user id who create the creation.
     created_at   BIGINT,      -- create at
     updated_at   BIGINT,      -- update at
-    active_langs SET<ASCII>,  -- active languages by translation, ISO 639-3
+    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
     original_url TEXT,        -- original web url (https://xxxxxxx)
     genre        LIST<TEXT>, -- genre
     title        TEXT,        -- title

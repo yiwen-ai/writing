@@ -1608,6 +1608,7 @@ dependencies = [
 name = "scylla-orm-macros-tests"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "isolang",
  "scylla-orm",
  "scylla-orm-macros",
@@ -2604,6 +2605,7 @@ dependencies = [
  "reqwest",
  "scylla",
  "scylla-orm",
+ "scylla-orm-macros",
  "serde",
  "serde_json",
  "structured-logger",

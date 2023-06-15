@@ -1,12 +1,11 @@
-use axum::{extract::State};
+use axum::extract::State;
 use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
-use validator::{Validate};
-
+use validator::Validate;
 
 use crate::db;
 use crate::erring::{HTTPError, SuccessResponse};
-use crate::object::{Object};
+use crate::object::Object;
 
 use super::{validate_xid, AppState};
 
@@ -65,7 +64,7 @@ impl From<db::Creation> for CreationOutput {
             created_at: val.created_at,
             updated_at: val.updated_at,
             active_langs: val
-                .active_langs
+                .active_languages
                 .iter()
                 .map(|l| l.to_name().to_string())
                 .collect(),

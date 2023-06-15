@@ -62,6 +62,7 @@ zstd = "0.12.3+zstd.1.5.2"
 [dependencies]
 axum-web = { path = "crates/axum-web" }
 scylla-orm = { path = "crates/scylla-orm" }
+scylla-orm-macros = { path = "crates/scylla-orm-macros" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
