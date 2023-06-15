@@ -6,9 +6,19 @@ WITH replication = { 'class': 'NetworkTopologyStrategy', 'replication_factor': '
 CREATE KEYSPACE IF NOT EXISTS writing
 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' };
 
-CREATE TABLE IF NOT EXISTS writing.creation (
+CREATE TABLE IF NOT EXISTS writing.creation_index (
     id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
     gid              BLOB,        -- group id, creation belong to
+    PRIMARY KEY (id)
+) WITH caching = {'enabled': 'true'}
+    AND comment = 'creations index'
+    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 0;
+
+CREATE TABLE IF NOT EXISTS writing.creation (
+    gid              BLOB,        -- group id, creation belong to
+    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
     status           TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Draft, 1: Review, 2: Approved
     rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     version          SMALLINT,    -- creation version
@@ -29,15 +39,13 @@ CREATE TABLE IF NOT EXISTS writing.creation (
     summary          TEXT,        -- summary
     content          BLOB,        -- content in CBOR format
     license          TEXT,        -- license url
-    PRIMARY KEY (id)
-) WITH caching = {'enabled': 'true'}
+    PRIMARY KEY (gid, id)
+) WITH CLUSTERING ORDER BY (id DESC)
+    AND caching = {'enabled': 'true'}
     AND comment = 'creations'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
-
-CREATE INDEX creations_by_group ON writing.creation (gid);           -- global secondary indexe
-CREATE INDEX creations_by_id_status ON writing.creation ((id), status); -- local secondary index
 
 CREATE TABLE IF NOT EXISTS writing.publication (
     id           BLOB,       -- creation id
@@ -47,7 +55,7 @@ CREATE TABLE IF NOT EXISTS writing.publication (
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
     published_at BIGINT,     -- published at
-    model        ASCII,      -- AI model name, default to empty
+    model        TEXT,      -- AI model name, default to empty
     title        TEXT,       -- title
     description  TEXT,       -- description
     keywords     LIST<TEXT>, -- keywords
@@ -70,7 +78,7 @@ CREATE TABLE IF NOT EXISTS writing.publication_draft (
     status       TINYINT,    -- int8, -2: Deleted, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
-    model        ASCII,      -- AI model name, default to empty
+    model        TEXT,      -- AI model name, default to empty
     title        TEXT,       -- title
     description  TEXT,       -- description
     keywords     LIST<TEXT>, -- keywords
@@ -110,7 +118,7 @@ CREATE TABLE IF NOT EXISTS writing.collection (
     version     SMALLINT,    -- publication version
     status      TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Normal, 1: Preferred
     updated_at  BIGINT,      -- update at, unix time with second precision.
-    genre       LIST<ASCII>, -- publication (creation) genre
+    genre       LIST<TEXT>, -- publication (creation) genre
     title       TEXT,        -- publication title
     description TEXT,        -- publication description
     summary     TEXT,        -- publication summary

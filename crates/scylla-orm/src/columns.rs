@@ -20,6 +20,10 @@ impl ColumnsMap {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn has(&self, key: &str) -> bool {
         self.0.contains_key(key)
     }
@@ -63,7 +67,7 @@ impl ColumnsMap {
         Ok(())
     }
 
-    pub fn fill(&mut self, row: Row, fields: Vec<&str>) -> anyhow::Result<()> {
+    pub fn fill(&mut self, row: Row, fields: Vec<String>) -> anyhow::Result<()> {
         if row.columns.len() != fields.len() {
             return Err(anyhow::Error::msg(format!(
                 "ColumnsMap::fill: row.columns.len({}) != fields.len({})",
@@ -188,9 +192,9 @@ mod tests {
             columns: Vec::new(),
         };
 
-        let mut fields: Vec<&str> = Vec::new();
+        let mut fields: Vec<String> = Vec::new();
         for (k, v) in map.iter() {
-            fields.push(k);
+            fields.push(k.to_owned());
             row.columns.push(Some(v.to_owned()));
         }
 

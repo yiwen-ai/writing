@@ -1,38 +1,46 @@
 CREATE KEYSPACE IF NOT EXISTS writing_test
 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' };
 
-CREATE TABLE IF NOT EXISTS writing_test.creation (
-    id           BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
-    gid          BLOB,        -- group id, creation belong to
-    status       TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Draft, 1: Review, 2: Approved
-    rating       TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
-    version      SMALLINT,    -- creation version
-    language     ASCII,       -- creation's language, ISO 639-3
-    creator      BLOB,        -- user id who create the creation.
-    created_at   BIGINT,      -- create at
-    updated_at   BIGINT,      -- update at
-    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
-    original_url TEXT,        -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,        -- title
-    description  TEXT,        -- description
-    cover        TEXT,        -- cover url
-    keywords     LIST<TEXT>,  -- keywords
-    labels       LIST<TEXT>,  -- labels for creation management
-    authors      LIST<TEXT>,  -- authors
-    reviewers    LIST<BLOB>,  -- reviewers
-    summary      TEXT,        -- summary
-    content      BLOB,        -- content in CBOR format
-    license      TEXT,        -- license url
+CREATE TABLE IF NOT EXISTS writing_test.creation_index (
+    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    gid              BLOB,        -- group id, creation belong to
     PRIMARY KEY (id)
 ) WITH caching = {'enabled': 'true'}
-    AND comment = 'creations'
+    AND comment = 'creations index'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX creations_by_group ON writing_test.creation (gid);           -- global secondary indexe
-CREATE INDEX creations_by_id_status ON writing_test.creation ((id), status); -- local secondary index
+CREATE TABLE IF NOT EXISTS writing_test.creation (
+    gid              BLOB,        -- group id, creation belong to
+    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    status           TINYINT,     -- int8, -2: Deleted, -1: Archived, 0: Draft, 1: Review, 2: Approved
+    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
+    version          SMALLINT,    -- creation version
+    language         ASCII,       -- creation's language, ISO 639-3
+    creator          BLOB,        -- user id who create the creation.
+    created_at       BIGINT,      -- create at
+    updated_at       BIGINT,      -- update at
+    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
+    original_url     TEXT,        -- original web url (https://xxxxxxx)
+    genre            LIST<TEXT>, -- genre
+    title            TEXT,        -- title
+    description      TEXT,        -- description
+    cover            TEXT,        -- cover url
+    keywords         LIST<TEXT>,  -- keywords
+    labels           LIST<TEXT>,  -- labels for creation management
+    authors          LIST<TEXT>,  -- authors
+    reviewers        LIST<BLOB>,  -- reviewers
+    summary          TEXT,        -- summary
+    content          BLOB,        -- content in CBOR format
+    license          TEXT,        -- license url
+    PRIMARY KEY (gid, id)
+) WITH CLUSTERING ORDER BY (id DESC)
+    AND caching = {'enabled': 'true'}
+    AND comment = 'creations'
+    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 0;
 
 CREATE TABLE IF NOT EXISTS writing_test.publication (
     id           BLOB,       -- creation id

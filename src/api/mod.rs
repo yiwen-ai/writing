@@ -18,7 +18,7 @@ pub static JARVIS: &str = "jarvis00000000000000";
 pub fn validate_xid(id: &str) -> Result<(), ValidationError> {
     let _ = xid::Id::from_str(id).map_err(|er| ValidationError {
         code: Cow::from("xid"),
-        message: Some(Cow::from(format!("invalid xid: {}, {:?}", id, er))),
+        message: Some(Cow::from(format!("Invalid xid: {}, {:?}", id, er))),
         params: HashMap::new(),
     })?;
 
@@ -28,7 +28,7 @@ pub fn validate_xid(id: &str) -> Result<(), ValidationError> {
 pub fn validate_language(lang: &str) -> Result<(), ValidationError> {
     let _ = isolang::Language::from_str(lang).map_err(|er| ValidationError {
         code: Cow::from("isolang"),
-        message: Some(Cow::from(format!("invalid language: {}, {:?}", lang, er))),
+        message: Some(Cow::from(format!("Invalid language: {}, {:?}", lang, er))),
         params: HashMap::new(),
     })?;
 
@@ -36,9 +36,9 @@ pub fn validate_language(lang: &str) -> Result<(), ValidationError> {
 }
 
 pub fn validate_cbor(data: &[u8]) -> Result<(), ValidationError> {
-    let _: ciborium::Value = ciborium::from_reader(&data[..]).map_err(|er| ValidationError {
+    let _: ciborium::Value = ciborium::from_reader(data).map_err(|er| ValidationError {
         code: Cow::from("cbor"),
-        message: Some(Cow::from(format!("invalid CBOR data, {:?}", er))),
+        message: Some(Cow::from(format!("Invalid CBOR data, {:?}", er))),
         params: HashMap::new(),
     })?;
 

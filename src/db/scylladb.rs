@@ -78,3 +78,11 @@ impl ScyllaDB {
         Ok(rows)
     }
 }
+
+pub fn extract_applied(res: QueryResult) -> bool {
+    let res = res
+        .single_row()
+        .map(|r| r.columns[0].as_ref().and_then(|r| r.as_boolean()))
+        .unwrap_or(Some(false));
+    res == Some(true)
+}

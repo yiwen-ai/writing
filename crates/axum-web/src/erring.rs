@@ -17,14 +17,39 @@ pub struct ErrorResponse {
 /// SuccessResponse is the response body for success.
 #[derive(Serialize)]
 pub struct SuccessResponse<S: Serialize> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_page_token: Option<String>,
     pub result: S,
+}
+
+impl<S: Serialize> SuccessResponse<S> {
+    pub fn new(result: S) -> Self {
+        SuccessResponse {
+            total_size: None,
+            next_page_token: None,
+            result,
+        }
+    }
 }
 
 #[derive(Serialize, Debug, Clone)]
 pub struct HTTPError {
     pub code: u16,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+}
+
+impl HTTPError {
+    pub fn new(code: u16, message: String) -> Self {
+        HTTPError {
+            code,
+            message,
+            data: None,
+        }
+    }
 }
 
 impl fmt::Display for HTTPError {
@@ -52,27 +77,13 @@ impl IntoResponse for HTTPError {
     }
 }
 
-// impl From<HTTPError> for anyhow::Error {
-//     fn from(err: HTTPError) -> Self {
-//         anyhow::Error::new(err)
-//     }
-// }
-
 impl From<anyhow::Error> for HTTPError {
     fn from(err: anyhow::Error) -> Self {
         match err.downcast::<Self>() {
             Ok(err) => err,
             Err(sel) => match sel.downcast::<SingleRowError>() {
-                Ok(err) => HTTPError {
-                    code: 404,
-                    message: format!("{:?}", err),
-                    data: None,
-                },
-                Err(sel) => HTTPError {
-                    code: 500,
-                    message: format!("{:?}", sel),
-                    data: None,
-                },
+                Ok(err) => HTTPError::new(404, format!("{:?}", err)),
+                Err(sel) => HTTPError::new(500, format!("{:?}", sel)),
             },
         }
     }
@@ -80,20 +91,12 @@ impl From<anyhow::Error> for HTTPError {
 
 impl From<ValidationError> for HTTPError {
     fn from(err: ValidationError) -> Self {
-        HTTPError {
-            code: 400,
-            message: format!("{:?}", err),
-            data: None,
-        }
+        HTTPError::new(400, format!("{:?}", err))
     }
 }
 
 impl From<ValidationErrors> for HTTPError {
     fn from(err: ValidationErrors) -> Self {
-        HTTPError {
-            code: 400,
-            message: format!("{:?}", err),
-            data: None,
-        }
+        HTTPError::new(400, format!("{:?}", err))
     }
 }

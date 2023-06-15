@@ -15,19 +15,30 @@ pub fn cql_orm(input: TokenStream) -> TokenStream {
         _ => panic!("CqlOrm can only be derived for structs"),
     };
 
-    let field_names0 = fields.iter().map(|f| &f.ident);
+    // Filter out fields that start with an underscore.
+    let fields_filtered = fields
+        .into_iter()
+        .filter(|f| {
+            let name = &f.ident.as_ref().unwrap().to_string();
+            !name.starts_with('_')
+        })
+        .collect::<Vec<_>>();
+    let fields_num = fields_filtered.len();
+
+    let field_names0 = fields_filtered.iter().map(|f| &f.ident);
     let field_names1 = field_names0.clone();
-    let field_names_string0 = fields.iter().map(|f| f.ident.as_ref().unwrap().to_string());
+    let field_names_string0 = fields_filtered
+        .iter()
+        .map(|f| f.ident.as_ref().unwrap().to_string());
     let field_names_string1 = field_names_string0.clone();
     let field_names_string2 = field_names_string0.clone();
     let field_names_string3 = field_names_string0.clone();
-    let fields_num = field_names0.len();
 
     let expanded = quote! {
         impl #struct_name {
-            pub fn fields() -> Vec<&'static str> {
+            pub fn fields() -> Vec<String> {
                 vec![
-                    #(#field_names_string0),*
+                    #(#field_names_string0.to_string()),*
                 ]
             }
 

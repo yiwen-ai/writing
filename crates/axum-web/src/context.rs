@@ -52,7 +52,7 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         Err(err) => {
             return (
                 StatusCode::UNAUTHORIZED,
-                format!("invalid x-user-id, {}", err),
+                format!("Invalid x-user-id, {}", err),
             )
                 .into_response()
         }

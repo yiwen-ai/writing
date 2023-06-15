@@ -8,7 +8,7 @@ pub struct Creation {
     pub id: xid::Id,
     pub status: i8,
     pub language: Language,
-    pub active_langs: HashSet<Language>,
+    pub _langs: HashSet<Language>,
     pub authors: Vec<String>,
     pub reviewers: Vec<xid::Id>,
     pub content: Vec<u8>,
