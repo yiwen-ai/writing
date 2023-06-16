@@ -219,6 +219,8 @@ pub struct Pagination {
     pub page_token: Option<String>,
     #[validate(range(min = 2, max = 1000))]
     pub page_size: Option<u16>,
+    #[validate(range(min = -1, max = 2))]
+    pub status: Option<i8>,
     pub fields: Option<Vec<String>>,
 }
 
@@ -241,7 +243,15 @@ pub async fn list_creation(
 
     let fields = input.fields.unwrap_or_default();
     let page_token = input.page_token.map(|s| xid::Id::from_str(&s).unwrap());
-    let res = db::Creation::find(&app.scylla, gid, fields, page_size, page_token).await?;
+    let res = db::Creation::find(
+        &app.scylla,
+        gid,
+        fields,
+        page_size,
+        page_token,
+        input.status,
+    )
+    .await?;
     let next_page_token = if res.len() >= page_size as usize {
         Some(res.last().unwrap().id.to_string())
     } else {

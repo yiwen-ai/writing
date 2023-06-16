@@ -415,23 +415,44 @@ impl Creation {
         select_fields: Vec<String>,
         page_size: u16,
         page_token: Option<xid::Id>,
+        status: Option<i8>,
     ) -> anyhow::Result<Vec<Creation>> {
         let fields = Self::select_fields(select_fields, true)?;
 
         let rows = if let Some(id) = page_token {
+            if status.is_none() {
+                let query = Query::new(format!(
+                "SELECT {} FROM creation WHERE gid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                fields.clone().join(","))).with_page_size(page_size as i32);
+                let params = (gid.as_bytes(), id.as_bytes(), page_size as i32);
+                db.execute_paged(query, params, None).await?
+            } else {
+                let query = Query::new(format!(
+                    "SELECT {} FROM creation WHERE gid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    fields.clone().join(","))).with_page_size(page_size as i32);
+                let params = (
+                    gid.as_bytes(),
+                    id.as_bytes(),
+                    status.unwrap(),
+                    page_size as i32,
+                );
+                db.execute_paged(query, params, None).await?
+            }
+        } else if status.is_none() {
             let query = Query::new(format!(
-                "SELECT {} FROM creation WHERE gid=? AND id<? AND status>=0 ORDER BY id DESC LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM creation WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            )).with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), id.as_bytes(), page_size as i32);
-            db.execute_paged(query, params, None).await?
-        } else {
-            let query = Query::new(format!(
-                "SELECT {} FROM creation WHERE gid=? AND status>=0 ORDER BY id DESC LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            )).with_page_size(page_size as i32);
+            ))
+            .with_page_size(page_size as i32);
             let params = (gid.as_bytes(), page_size as i32);
             db.execute_iter(query, params).await? // TODO: execute_iter or execute_paged?
+        } else {
+            let query = Query::new(format!(
+                "SELECT {} FROM creation WHERE gid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                fields.clone().join(",")
+            )).with_page_size(page_size as i32);
+            let params = (gid.as_bytes(), status.unwrap(), page_size as i32);
+            db.execute_iter(query, params).await?
         };
 
         let mut res: Vec<Creation> = Vec::with_capacity(rows.len());
