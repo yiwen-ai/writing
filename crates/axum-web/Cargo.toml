@@ -15,8 +15,10 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+base64 = { workspace = true }
 ciborium = { workspace = true }
 ciborium-io = { workspace = true }
+isolang = { workspace = true }
 libflate = { workspace = true }
 log = { workspace = true }
 mime = { workspace = true }

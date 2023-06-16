@@ -1,12 +1,12 @@
-use axum::extract::State;
-
+use axum::{extract::State};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 use validator::ValidationError;
 
 use crate::db;
 
-use crate::object::{Object, ObjectType};
+
+use crate::object::TypedObject;
 
 pub mod creation;
 
@@ -68,31 +68,31 @@ pub struct AppInfo {
     pub scylla_retries_num: u64,
 }
 
-pub async fn version(ct: ObjectType) -> Object<AppVersion> {
-    Object(
-        ct.or_default(),
-        AppVersion {
-            name: APP_NAME.to_string(),
-            version: APP_VERSION.to_string(),
-        },
-    )
+pub async fn version(
+    to: TypedObject<()>,
+    State(_): State<Arc<AppState>>,
+) -> TypedObject<AppVersion> {
+    to.with(AppVersion {
+        name: APP_NAME.to_string(),
+        version: APP_VERSION.to_string(),
+    })
 }
 
-pub async fn healthz(State(app): State<Arc<AppState>>, ct: ObjectType) -> Object<AppInfo> {
+pub async fn healthz(
+    to: TypedObject<()>,
+    State(app): State<Arc<AppState>>,
+) -> TypedObject<AppInfo> {
     let m = app.scylla.metrics();
-    Object(
-        ct.or_default(),
-        AppInfo {
-            scylla_latency_avg_ms: m.get_latency_avg_ms().unwrap_or(0),
-            scylla_latency_p99_ms: m.get_latency_percentile_ms(99.0f64).unwrap_or(0),
-            scylla_latency_p90_ms: m.get_latency_percentile_ms(90.0f64).unwrap_or(0),
-            scylla_errors_num: m.get_errors_num(),
-            scylla_queries_num: m.get_queries_num(),
-            scylla_errors_iter_num: m.get_errors_iter_num(),
-            scylla_queries_iter_num: m.get_queries_iter_num(),
-            scylla_retries_num: m.get_retries_num(),
-        },
-    )
+    to.with(AppInfo {
+        scylla_latency_avg_ms: m.get_latency_avg_ms().unwrap_or(0),
+        scylla_latency_p99_ms: m.get_latency_percentile_ms(99.0f64).unwrap_or(0),
+        scylla_latency_p90_ms: m.get_latency_percentile_ms(90.0f64).unwrap_or(0),
+        scylla_errors_num: m.get_errors_num(),
+        scylla_queries_num: m.get_queries_num(),
+        scylla_errors_iter_num: m.get_errors_iter_num(),
+        scylla_queries_iter_num: m.get_queries_iter_num(),
+        scylla_retries_num: m.get_retries_num(),
+    })
 }
 
 #[cfg(test)]

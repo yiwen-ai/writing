@@ -1,14 +1,15 @@
+use isolang::Language;
+use scylla_orm::ColumnsMap;
+use scylla_orm_macros::CqlOrm;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
 use super::{
     scylladb,
-    scylladb::{extract_applied, CqlValue},
+    scylladb::{extract_applied, CqlValue, Query},
 };
+use crate::context::unix_ms;
 use crate::erring::HTTPError;
-use isolang::Language;
-use scylla_orm::ColumnsMap;
-use scylla_orm_macros::CqlOrm;
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct CreationIndex {
@@ -192,6 +193,57 @@ impl Creation {
         Ok(extract_applied(res))
     }
 
+    pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
+        let res = self.get_one(db, vec!["version".to_string()]).await;
+        if res.is_err() {
+            return Ok(false); // already deleted
+        }
+
+        if self.version != version {
+            return Err(anyhow::Error::new(HTTPError::new(
+                409,
+                format!(
+                    "Creation version conflict, expected version {}, got {}",
+                    self.version, version
+                ),
+            )));
+        }
+
+        self.get_one(db, Vec::new()).await?;
+        self.updated_at = (unix_ms() / 1000) as i64;
+
+        let fields = Self::fields();
+        self._fields = fields.iter().map(|f| f.to_string()).collect();
+
+        let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut insert_params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
+        let cols = self.to()?;
+
+        for field in &fields {
+            cols_name.push(field);
+            vals_name.push("?");
+            insert_params.push(cols.get(field).unwrap());
+        }
+
+        let insert_query = format!(
+            "INSERT INTO deleted_creation ({}) VALUES ({})",
+            cols_name.join(","),
+            vals_name.join(","),
+        );
+
+        let delete_query = "DELETE FROM creation WHERE gid=? AND id=?";
+        let delete_params = (self.gid.as_bytes(), self.id.as_bytes());
+
+        let _ = db
+            .batch(
+                vec![insert_query.as_str(), delete_query],
+                (insert_params, delete_params),
+            )
+            .await?;
+        Ok(true)
+    }
+
     pub async fn find(
         db: &scylladb::ScyllaDB,
         gid: xid::Id,
@@ -202,19 +254,19 @@ impl Creation {
         let fields = Self::select_fields(select_fields, true)?;
 
         let rows = if let Some(id) = page_token {
-            let query = format!(
-                "SELECT {} FROM creation WHERE gid=? AND id<=? AND status>=0 ORDER BY id DESC LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+            let query = Query::new(format!(
+                "SELECT {} FROM creation WHERE gid=? AND id<? AND status>=0 ORDER BY id DESC LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            );
+            )).with_page_size(page_size as i32);
             let params = (gid.as_bytes(), id.as_bytes(), page_size as i32);
-            db.execute_iter(query, params).await?
+            db.execute_paged(query, params, None).await?
         } else {
-            let query = format!(
+            let query = Query::new(format!(
                 "SELECT {} FROM creation WHERE gid=? AND status>=0 ORDER BY id DESC LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            );
+            )).with_page_size(page_size as i32);
             let params = (gid.as_bytes(), page_size as i32);
-            db.execute_iter(query, params).await?
+            db.execute_iter(query, params).await? // TODO: execute_iter or execute_paged?
         };
 
         let mut res: Vec<Creation> = Vec::with_capacity(rows.len());
@@ -315,6 +367,17 @@ mod tests {
         assert_eq!(doc3._fields, vec!["gid", "title"]);
         assert!(doc3.content.is_empty());
 
-        // println!("doc: {:#?}", doc3);
+        // delete
+        let mut doc = Creation::with_pk(uid, did);
+        let res = doc.delete(db, 0).await;
+        assert!(res.is_err());
+        let err: erring::HTTPError = res.unwrap_err().into();
+        assert_eq!(err.code, 409);
+
+        let res = doc.delete(db, 1).await.unwrap();
+        assert!(res);
+
+        let res = doc.delete(db, 1).await.unwrap();
+        assert!(!res); // already deleted
     }
 }

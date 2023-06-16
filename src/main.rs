@@ -1,6 +1,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use axum::{http::header::HeaderName, middleware, routing::get, routing::post, Router};
+use axum::{
+    http::header::HeaderName,
+    middleware,
+    response::{IntoResponse, Response},
+    routing, Router,
+};
 use structured_logger::{async_json::new_writer, Builder};
 use tokio::{io, signal};
 use tower::ServiceBuilder;
@@ -16,6 +21,10 @@ mod db;
 use axum_web::context;
 use axum_web::erring;
 use axum_web::object;
+
+pub async fn todo() -> Response {
+    (erring::HTTPError::new(501, "TODO".to_string())).into_response()
+}
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
@@ -45,13 +54,49 @@ async fn main() -> anyhow::Result<()> {
         )));
 
     let app = Router::new()
-        .route("/", get(api::version))
-        .route("/healthz", get(api::healthz))
-        .route(
+        .route("/", routing::get(api::version))
+        .route("/healthz", routing::get(api::healthz))
+        .nest(
             "/v1/creation",
-            post(api::creation::create_creation).get(api::creation::get_creation),
+            Router::new()
+                .route(
+                    "/",
+                    routing::post(api::creation::create_creation)
+                        .get(api::creation::get_creation)
+                        .patch(todo)
+                        .delete(api::creation::delete_creation),
+                )
+                .route("/list", routing::post(api::creation::list_creation))
+                .route("/archive", routing::patch(todo)) // github return 302 to client
+                .route("/unarchive", routing::patch(todo)) // github return 302
+                .route("/content", routing::patch(todo)), // patch content
         )
-        .route("/v1/creation:list", post(api::creation::list_creation))
+        .nest(
+            "/v1/publication",
+            Router::new()
+                .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
+                .route("/list", routing::post(todo))
+                .nest(
+                    "/comment",
+                    Router::new()
+                        .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
+                        .route("/list", routing::post(todo)),
+                ),
+        )
+        .nest(
+            "/v1/collection",
+            Router::new()
+                .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
+                .route("/list", routing::post(todo)),
+        )
+        .nest(
+            "/v1/sys",
+            Router::new()
+                .route("/creation", routing::patch(todo).delete(todo))
+                .route("/publication", routing::patch(todo).delete(todo))
+                .route("/publication/comment", routing::patch(todo).delete(todo))
+                .route("/collection", routing::patch(todo).delete(todo)),
+        )
         .route_layer(mds)
         .with_state(app_state.clone());
 

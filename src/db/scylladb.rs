@@ -1,6 +1,6 @@
 use futures::{stream::StreamExt, Stream};
 use scylla::{
-    frame::value::ValueList,
+    frame::value::{BatchValues, ValueList},
     statement::{prepared_statement::PreparedStatement, Consistency, SerialConsistency},
     transport::{query_result::QueryResult, Compression, ExecutionProfile},
     Metrics, Session, SessionBuilder,
@@ -8,8 +8,10 @@ use scylla::{
 use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
+    batch::Batch,
     frame::response::result::{ColumnType, CqlValue, Row},
     query::Query,
+    Bytes,
 };
 
 pub use scylla_orm::{Ascii, ColumnsMap, CqlValueSerder};
@@ -55,7 +57,7 @@ impl ScyllaDB {
     ) -> anyhow::Result<QueryResult> {
         let mut prepared: PreparedStatement = self.session.prepare(query).await?;
 
-        prepared.set_consistency(Consistency::One);
+        prepared.set_consistency(Consistency::Quorum);
         let res = self.session.execute(&prepared, params).await?;
         Ok(res)
     }
@@ -67,7 +69,7 @@ impl ScyllaDB {
     ) -> anyhow::Result<Vec<Row>> {
         let mut prepared: PreparedStatement = self.session.prepare(query).await?;
 
-        prepared.set_consistency(Consistency::One);
+        prepared.set_consistency(Consistency::Quorum);
         let mut rows_stream = self.session.execute_iter(prepared, params).await?;
 
         let (capacity, _) = rows_stream.size_hint();
@@ -76,6 +78,38 @@ impl ScyllaDB {
             rows.push(next_row?);
         }
         Ok(rows)
+    }
+
+    pub async fn execute_paged(
+        &self,
+        query: impl Into<Query>,
+        params: impl ValueList,
+        paging_state: Option<Bytes>,
+    ) -> anyhow::Result<Vec<Row>> {
+        let mut prepared: PreparedStatement = self.session.prepare(query).await?;
+
+        prepared.set_consistency(Consistency::Quorum);
+        let res = self
+            .session
+            .execute_paged(&prepared, params, paging_state)
+            .await?;
+
+        Ok(res.rows.unwrap_or_default())
+    }
+
+    pub async fn batch(
+        &self,
+        statements: Vec<&str>,
+        values: impl BatchValues,
+    ) -> anyhow::Result<QueryResult> {
+        let mut batch: Batch = Default::default();
+        for statement in statements {
+            batch.append_statement(statement);
+        }
+        let mut prepared_batch: Batch = self.session.prepare_batch(&batch).await?;
+        prepared_batch.set_consistency(Consistency::Quorum);
+        let res = self.session.batch(&prepared_batch, values).await?;
+        Ok(res)
     }
 }
 

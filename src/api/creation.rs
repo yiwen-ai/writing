@@ -10,7 +10,7 @@ use validator::Validate;
 use crate::context::{unix_ms, ReqContext};
 use crate::db;
 use crate::erring::{HTTPError, SuccessResponse};
-use crate::object::{Object, ObjectType};
+use crate::object::TypedObject;
 
 use super::{validate_cbor, validate_language, validate_xid, AppState};
 
@@ -35,15 +35,16 @@ pub struct CreateCreationInput {
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
     #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
+    #[serde(with = "serde_bytes")]
     pub content: Vec<u8>,
     #[validate(url)]
     pub license: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct CreationOutput {
-    pub id: Vec<u8>,
-    pub gid: Vec<u8>,
+    pub id: TypedObject<xid::Id>,
+    pub gid: TypedObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,15 +52,15 @@ pub struct CreationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
+    pub language: Option<TypedObject<Language>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<Vec<u8>>,
+    pub creator: Option<TypedObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_languages: Option<Vec<String>>,
+    pub active_languages: Option<Vec<TypedObject<Language>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -77,20 +78,20 @@ pub struct CreationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviewers: Option<Vec<Vec<u8>>>,
+    pub reviewers: Option<Vec<TypedObject<xid::Id>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Vec<u8>>,
+    pub content: Option<TypedObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 }
 
-impl From<db::Creation> for CreationOutput {
-    fn from(val: db::Creation) -> Self {
+impl CreationOutput {
+    fn from<T>(val: db::Creation, to: &TypedObject<T>) -> Self {
         let mut rt = Self {
-            gid: val.gid.as_bytes().to_vec(),
-            id: val.id.as_bytes().to_vec(),
+            gid: to.with(val.gid),
+            id: to.with(val.id),
             ..Default::default()
         };
 
@@ -99,17 +100,12 @@ impl From<db::Creation> for CreationOutput {
                 "status" => rt.status = Some(val.status),
                 "rating" => rt.rating = Some(val.rating),
                 "version" => rt.version = Some(val.version),
-                "language" => rt.language = Some(val.language.to_name().to_string()),
-                "creator" => rt.creator = Some(val.creator.as_bytes().to_vec()),
+                "language" => rt.language = Some(to.with(val.language)),
+                "creator" => rt.creator = Some(to.with(val.creator)),
                 "created_at" => rt.created_at = Some(val.created_at),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
                 "active_languages" => {
-                    rt.active_languages = Some(
-                        val.active_languages
-                            .iter()
-                            .map(|l| l.to_name().to_string())
-                            .collect(),
-                    )
+                    rt.active_languages = Some(to.with_set(val.active_languages.to_owned()))
                 }
                 "original_url" => rt.original_url = Some(val.original_url.to_owned()),
                 "genre" => rt.genre = Some(val.genre.to_owned()),
@@ -119,16 +115,9 @@ impl From<db::Creation> for CreationOutput {
                 "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "labels" => rt.labels = Some(val.labels.to_owned()),
                 "authors" => rt.authors = Some(val.authors.to_owned()),
-                "reviewers" => {
-                    rt.reviewers = Some(
-                        val.reviewers
-                            .iter()
-                            .map(|r| r.as_bytes().to_vec())
-                            .collect(),
-                    )
-                }
+                "reviewers" => rt.reviewers = Some(to.with_vec(val.reviewers.to_owned())),
                 "summary" => rt.summary = Some(val.summary.to_owned()),
-                "content" => rt.content = Some(val.content.to_owned()),
+                "content" => rt.content = Some(to.with(val.content.to_owned())),
                 "license" => rt.license = Some(val.license.to_owned()),
                 _ => {}
             }
@@ -141,8 +130,9 @@ impl From<db::Creation> for CreationOutput {
 pub async fn create_creation(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    Object(ct, input): Object<CreateCreationInput>,
-) -> Result<Object<SuccessResponse<CreationOutput>>, HTTPError> {
+    to: TypedObject<CreateCreationInput>,
+) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.separate();
     input.validate()?;
 
     let now = (unix_ms() / 1000) as i64;
@@ -175,7 +165,7 @@ pub async fn create_creation(
         ("id", doc.id.to_string().into()),
     ])
     .await;
-    Ok(Object(ct, SuccessResponse::new(doc.into())))
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -190,9 +180,9 @@ pub struct QueryId {
 pub async fn get_creation(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    ct: ObjectType,
+    to: TypedObject<()>,
     input: Query<QueryId>,
-) -> Result<Object<SuccessResponse<CreationOutput>>, HTTPError> {
+) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
     input.validate()?;
 
     let id = xid::Id::from_str(&input.id).unwrap(); // validated
@@ -220,7 +210,7 @@ pub async fn get_creation(
         .map(|s| s.to_string())
         .collect();
     doc.get_one(&app.scylla, fields).await?;
-    Ok(Object(ct, SuccessResponse::new(doc.into())))
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -237,8 +227,9 @@ pub struct Pagination {
 pub async fn list_creation(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    Object(ct, input): Object<Pagination>,
-) -> Result<Object<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
+    to: TypedObject<Pagination>,
+) -> Result<TypedObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
+    let (to, input) = to.separate();
     input.validate()?;
 
     // let page_token: xid::Id = input.page_token.unwrap_or_default().into()?;
@@ -259,12 +250,109 @@ pub async fn list_creation(
         None
     };
 
-    Ok(Object(
-        ct,
-        SuccessResponse {
-            total_size: None,
-            next_page_token,
-            result: res.iter().map(|r| r.to_owned().into()).collect(),
-        },
-    ))
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token,
+        result: res
+            .iter()
+            .map(|r| CreationOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateCreationInput {
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub id: String,
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub gid: String,
+    pub updated_at: i64,
+    pub title: Option<String>,
+    #[validate(length(min = 3, max = 1024))]
+    pub description: Option<String>,
+    #[validate(url)]
+    pub cover: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub labels: Option<Vec<String>>,
+    pub authors: Option<Vec<String>>,
+    #[validate(length(min = 10, max = 2048))]
+    pub summary: Option<String>,
+    #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
+    pub content: Vec<u8>,
+    #[validate(url)]
+    pub license: Option<String>,
+}
+
+pub async fn update_creation(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: TypedObject<CreateCreationInput>,
+) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.separate();
+    input.validate()?;
+
+    let now = (unix_ms() / 1000) as i64;
+    let mut doc = db::Creation {
+        gid: xid::Id::from_str(&input.gid).unwrap(),
+        id: xid::new(),
+        version: 1,
+        language: Language::from_str(&input.language).unwrap_or_default(),
+        creator: ctx.user,
+        created_at: now,
+        updated_at: now,
+        original_url: input.original_url.unwrap_or_default(),
+        genre: input.genre.unwrap_or_default(),
+        title: input.title,
+        description: input.description.unwrap_or_default(),
+        cover: input.cover.unwrap_or_default(),
+        keywords: input.keywords.unwrap_or_default(),
+        labels: input.labels.unwrap_or_default(),
+        authors: input.authors.unwrap_or_default(),
+        summary: input.summary.unwrap_or_default(),
+        content: input.content,
+        license: input.license.unwrap_or_default(),
+        ..Default::default()
+    };
+
+    doc.save(&app.scylla).await?;
+    ctx.set_kvs(vec![
+        ("action", "create_creation".into()),
+        ("gid", doc.gid.to_string().into()),
+        ("id", doc.id.to_string().into()),
+    ])
+    .await;
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct QueryIdVersion {
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub id: String,
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub gid: String,
+    #[validate(range(min = 1, max = 10000))]
+    pub version: i16,
+}
+
+pub async fn delete_creation(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: TypedObject<()>,
+    input: Query<QueryIdVersion>,
+) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    input.validate()?;
+
+    let id = xid::Id::from_str(&input.id).unwrap(); // validated
+    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+
+    ctx.set_kvs(vec![
+        ("action", "delete_creation".into()),
+        ("gid", input.gid.clone().into()),
+        ("id", input.id.clone().into()),
+    ])
+    .await;
+
+    let mut doc = db::Creation::with_pk(gid, id);
+    doc.delete(&app.scylla, input.version).await?;
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
