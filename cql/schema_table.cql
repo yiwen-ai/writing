@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS creation_index (
     id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
     gid              BLOB,        -- group id, creation belong to
+    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     PRIMARY KEY (id)
 ) WITH caching = {'enabled': 'true'}
     AND comment = 'creations index'
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS creation (
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
+
+CREATE INDEX creation_gid_status ON creation ((gid), status);
 
 CREATE TABLE IF NOT EXISTS publication (
     id           BLOB,       -- creation id
@@ -84,6 +87,8 @@ CREATE TABLE IF NOT EXISTS publication_draft (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
+CREATE INDEX publication_draft_gid_status ON publication_draft ((gid), status);
+
 CREATE TABLE IF NOT EXISTS comment (
     pid         BLOB,    -- publication id comment to, 12 bytes XID
     id          BLOB,    -- comment id, 12 bytes XID
@@ -102,6 +107,8 @@ CREATE TABLE IF NOT EXISTS comment (
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
+
+CREATE INDEX comment_pid_status ON creation ((pid), status);
 
 CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
@@ -122,6 +129,8 @@ CREATE TABLE IF NOT EXISTS collection (
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
+
+CREATE INDEX collection_uid_status ON collection ((uid), status);
 
 CREATE TABLE IF NOT EXISTS deleted_creation (
     gid              BLOB,        -- group id, creation belong to

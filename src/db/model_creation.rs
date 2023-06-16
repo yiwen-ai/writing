@@ -15,6 +15,7 @@ use crate::erring::HTTPError;
 pub struct CreationIndex {
     pub id: xid::Id,
     pub gid: xid::Id,
+    pub rating: i8,
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
 
@@ -29,12 +30,12 @@ impl CreationIndex {
     pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
         self._fields = Self::fields().iter().map(|f| f.to_string()).collect();
 
-        let query = "SELECT gid FROM creation_index WHERE id=? LIMIT 1";
+        let query = "SELECT gid,rating FROM creation_index WHERE id=? LIMIT 1";
         let params = (self.id.as_bytes(),);
         let res = db.execute(query, params).await?.single_row()?;
 
-        let mut cols = ColumnsMap::with_capacity(1);
-        cols.fill(res, vec!["gid".to_string()])?;
+        let mut cols = ColumnsMap::with_capacity(2);
+        cols.fill(res, vec!["gid".to_string(), "rating".to_string()])?;
         self.fill(&cols);
 
         Ok(())
@@ -51,8 +52,8 @@ impl CreationIndex {
         }
 
         self._fields = Self::fields().iter().map(|f| f.to_string()).collect();
-        let query = "INSERT INTO creation_index (id,gid) VALUES (?,?) IF NOT EXISTS";
-        let params = (self.id.as_bytes(), self.gid.as_bytes());
+        let query = "INSERT INTO creation_index (id,gid,rating) VALUES (?,?,?) IF NOT EXISTS";
+        let params = (self.id.as_bytes(), self.gid.as_bytes(), 0i8);
         let res = db.execute(query, params).await?;
         Ok(extract_applied(res))
     }
@@ -148,14 +149,6 @@ impl Creation {
     }
 
     pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
-        use std::ops::Sub;
-        let now = SystemTime::now().sub(Duration::from_secs(10));
-        if self.id.time() < now {
-            return Err(anyhow::Error::new(HTTPError::new(
-                400,
-                format!("Invalid id {:?}", self.id),
-            )));
-        }
         let mut index = CreationIndex::with_pk(self.id);
         index.gid = self.gid;
         let ok = index.save(db).await?;
@@ -168,6 +161,11 @@ impl Creation {
                 ),
             )));
         }
+
+        let now = (unix_ms() / 1000) as i64;
+        self.created_at = now;
+        self.updated_at = now;
+        self.version = 1;
 
         let fields = Self::fields();
         self._fields = fields.iter().map(|f| f.to_string()).collect();
@@ -191,6 +189,95 @@ impl Creation {
 
         let res = db.execute(query, params).await?;
         Ok(extract_applied(res))
+    }
+
+    pub async fn update(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        cols: ColumnsMap,
+        updated_at: i64,
+    ) -> anyhow::Result<i64> {
+        let valid_fields = vec![
+            "title",
+            "description",
+            "cover",
+            "summary",
+            "keywords",
+            "labels",
+            "authors",
+            "summary",
+            "content",
+            "license",
+        ];
+        let update_fields = cols.keys();
+        for field in &update_fields {
+            if !valid_fields.contains(&field.as_str()) {
+                return Err(anyhow::Error::new(HTTPError::new(
+                    400,
+                    format!("Invalid field: {}", field),
+                )));
+            }
+        }
+
+        self.get_one(
+            db,
+            vec![
+                "status".to_string(),
+                "version".to_string(),
+                "updated_at".to_string(),
+            ],
+        )
+        .await?;
+        if self.updated_at != updated_at {
+            return Err(anyhow::Error::new(HTTPError::new(
+                409,
+                format!(
+                    "Creation updated_at conflict, expected updated_at {}, got {}",
+                    self.updated_at, updated_at
+                ),
+            )));
+        }
+        if self.status < 0 || self.status > 1 {
+            return Err(anyhow::Error::new(HTTPError::new(
+                409,
+                format!("Creation can not be update, status {}", self.status),
+            )));
+        }
+
+        let mut incr = 1usize; // should add `updated_at`
+        if cols.has("content") {
+            incr += 1; // should add `version`
+        }
+
+        let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + incr);
+        let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + incr + 3);
+
+        let new_updated_at = (unix_ms() / 1000) as i64;
+        let mut new_version = self.version;
+        set_fields.push("updated_at=?".to_string());
+        params.push(CqlValue::BigInt(new_updated_at));
+        if cols.has("content") {
+            set_fields.push("version=?".to_string());
+            new_version += 1;
+            params.push(CqlValue::SmallInt(new_version));
+        }
+        for field in &update_fields {
+            set_fields.push(format!("{}=?", field));
+            params.push(cols.get(field).unwrap().to_owned());
+        }
+
+        let query = format!(
+            "UPDATE creation SET {} WHERE gid=? AND id=? IF updated_at=?",
+            set_fields.join(",")
+        );
+        params.push(CqlValue::Blob(self.gid.as_bytes().to_vec()));
+        params.push(CqlValue::Blob(self.id.as_bytes().to_vec()));
+        params.push(CqlValue::BigInt(updated_at));
+
+        let _ = db.execute(query, params).await?;
+        self.updated_at = new_updated_at;
+        self.version = new_version;
+        Ok(new_updated_at)
     }
 
     pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
@@ -303,81 +390,140 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn creation_model_works() {
+    async fn creation_model_works() -> anyhow::Result<()> {
         assert!(Creation::fields().contains(&"license".to_string()));
         assert!(!Creation::fields().contains(&"_fields".to_string()));
 
         let db = DB.get_or_init(get_db).await;
         let did = xid::new();
-        let uid = xid::Id::from_str("jarvis00000000000000").unwrap();
-        let mut doc = Creation::with_pk(uid, did);
-        doc.version = 1;
-        doc.language = Language::Eng;
-        doc.title = "Hello World".to_string();
-        ciborium::into_writer(
-            &cbor!({
-                "type" => "doc",
-                "content" => [{
-                    "type" => "heading",
-                    "attrs" => {
-                        "id" => "Y3T1Ik",
-                        "level" => 1u8,
-                    },
+        let uid = xid::Id::from_str("jarvis00000000000000")?;
+
+        // create
+        {
+            let mut doc = Creation::with_pk(uid, did);
+            doc.language = Language::Eng;
+            doc.title = "Hello World".to_string();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
                     "content" => [{
-                        "type" => "text",
-                        "text" => "Hello World",
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World",
+                        }],
                     }],
-                }],
-            })
-            .unwrap(),
-            &mut doc.content,
-        )
-        .unwrap();
+                })?,
+                &mut doc.content,
+            )?;
 
-        // println!("doc: {:?}", doc.content);
-        // 0xa2647479706563646f6367636f6e74656e7481a364747970656768656164696e67656174747273a26269646659335431496b656c6576656c0167636f6e74656e7481a26474797065647465787464746578746b48656c6c6f20576f726c64
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
 
-        let res = doc.get_one(db, vec![]).await;
-        assert!(res.is_err());
-        let err: erring::HTTPError = res.unwrap_err().into();
-        assert_eq!(err.code, 404);
+            assert!(doc.save(db).await?);
+            let res = doc.save(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
+            assert_eq!(err.code, 409);
 
-        assert!(doc.save(db).await.unwrap());
-        let res = doc.save(db).await;
-        assert!(res.is_err());
-        let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
-        assert_eq!(err.code, 409);
+            let mut doc2 = Creation::with_pk(uid, did);
+            doc2.get_one(db, vec![]).await?;
+            // println!("doc: {:#?}", doc2);
 
-        let mut doc2 = Creation::with_pk(uid, did);
-        doc2.get_one(db, vec![]).await.unwrap();
-        // println!("doc: {:#?}", doc2);
+            assert_eq!(doc2.title.as_str(), "Hello World");
+            assert_eq!(doc2.version, 1);
+            assert_eq!(doc2.language, Language::Eng);
+            assert_eq!(doc2.content, doc.content);
 
-        assert_eq!(doc2.title.as_str(), "Hello World");
-        assert_eq!(doc2.version, 1);
-        assert_eq!(doc2.language, Language::Eng);
-        assert_eq!(doc2.content, doc.content);
+            let mut doc3 = Creation::with_pk(uid, did);
+            doc3.get_one(db, vec!["gid".to_string(), "title".to_string()])
+                .await?;
+            assert_eq!(doc3.title.as_str(), "Hello World");
+            assert_eq!(doc3.version, 0);
+            assert_eq!(doc3.language, Language::default());
+            assert_eq!(doc3._fields, vec!["gid", "title"]);
+            assert!(doc3.content.is_empty());
+        }
 
-        let mut doc3 = Creation::with_pk(uid, did);
-        doc3.get_one(db, vec!["gid".to_string(), "title".to_string()])
-            .await
-            .unwrap();
-        assert_eq!(doc3.title.as_str(), "Hello World");
-        assert_eq!(doc3.version, 0);
-        assert_eq!(doc3.language, Language::default());
-        assert_eq!(doc3._fields, vec!["gid", "title"]);
-        assert!(doc3.content.is_empty());
+        // update
+        {
+            let mut doc = Creation::with_pk(uid, did);
+            let mut cols = ColumnsMap::new();
+            cols.set_as("status", &2i8)?;
+            let res = doc.update(db, cols, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400); // status is not updatable
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("title", &"update title 1".to_string())?;
+            let res = doc.update(db, cols, 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409); // updated_at not match
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("title", &"title 1".to_string())?;
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res >= doc.updated_at);
+            assert_eq!(doc.version, 1);
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("title", &"title 2".to_string())?;
+            cols.set_as("description", &"description 2".to_string())?;
+            cols.set_as("cover", &"cover 2".to_string())?;
+            cols.set_as("summary", &"summary 2".to_string())?;
+            cols.set_as("keywords", &vec!["keyword".to_string()])?;
+            cols.set_as("labels", &vec!["label 1".to_string()])?;
+            cols.set_as("authors", &vec!["author 1".to_string()])?;
+            cols.set_as("summary", &"summary 2".to_string())?;
+
+            let mut content: Vec<u8> = Vec::new();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
+                    "content" => [{
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World 2",
+                        }],
+                    }],
+                })?,
+                &mut content,
+            )?;
+            cols.set_as("content", &content)?;
+            cols.set_as("license", &"license 2".to_string())?;
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res >= doc.updated_at);
+            assert_eq!(doc.version, 2);
+        }
 
         // delete
-        let mut doc = Creation::with_pk(uid, did);
-        let res = doc.delete(db, 0).await;
-        assert!(res.is_err());
-        let err: erring::HTTPError = res.unwrap_err().into();
-        assert_eq!(err.code, 409);
+        {
+            let mut doc = Creation::with_pk(uid, did);
+            let res = doc.delete(db, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
 
-        let res = doc.delete(db, 1).await.unwrap();
-        assert!(res);
+            let res = doc.delete(db, 2).await?;
+            assert!(res);
 
-        let res = doc.delete(db, 1).await.unwrap();
-        assert!(!res); // already deleted
+            let res = doc.delete(db, 2).await?;
+            assert!(!res); // already deleted
+        }
+
+        Ok(())
     }
 }

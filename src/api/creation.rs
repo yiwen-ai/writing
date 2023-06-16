@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::{convert::From, str::FromStr, sync::Arc};
 use validator::Validate;
 
-use crate::context::{unix_ms, ReqContext};
+use crate::context::ReqContext;
 use crate::db;
 use crate::erring::{HTTPError, SuccessResponse};
 use crate::object::TypedObject;
+
+use scylla_orm::ColumnsMap;
 
 use super::{validate_cbor, validate_language, validate_xid, AppState};
 
@@ -132,18 +134,14 @@ pub async fn create_creation(
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: TypedObject<CreateCreationInput>,
 ) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
-    let (to, input) = to.separate();
+    let (to, input) = to.unwrap_type();
     input.validate()?;
 
-    let now = (unix_ms() / 1000) as i64;
     let mut doc = db::Creation {
         gid: xid::Id::from_str(&input.gid).unwrap(),
         id: xid::new(),
-        version: 1,
         language: Language::from_str(&input.language).unwrap_or_default(),
         creator: ctx.user,
-        created_at: now,
-        updated_at: now,
         original_url: input.original_url.unwrap_or_default(),
         genre: input.genre.unwrap_or_default(),
         title: input.title,
@@ -229,7 +227,7 @@ pub async fn list_creation(
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: TypedObject<Pagination>,
 ) -> Result<TypedObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
-    let (to, input) = to.separate();
+    let (to, input) = to.unwrap_type();
     input.validate()?;
 
     // let page_token: xid::Id = input.page_token.unwrap_or_default().into()?;
@@ -272,49 +270,82 @@ pub struct UpdateCreationInput {
     pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
+    #[validate(length(min = 0, max = 10))]
     pub keywords: Option<Vec<String>>,
+    #[validate(length(min = 0, max = 20))]
     pub labels: Option<Vec<String>>,
+    #[validate(length(min = 0, max = 100))]
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
     #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
-    pub content: Vec<u8>,
+    pub content: Option<Vec<u8>>,
     #[validate(url)]
     pub license: Option<String>,
+}
+
+impl UpdateCreationInput {
+    fn into(self) -> anyhow::Result<ColumnsMap> {
+        let mut cols = ColumnsMap::new();
+        if let Some(title) = self.title {
+            cols.set_as("title", &title)?;
+        }
+        if let Some(description) = self.description {
+            cols.set_as("description", &description)?;
+        }
+        if let Some(cover) = self.cover {
+            cols.set_as("cover", &cover)?;
+        }
+        if let Some(keywords) = self.keywords {
+            cols.set_as("keywords", &keywords)?;
+        }
+        if let Some(labels) = self.labels {
+            cols.set_as("labels", &labels)?;
+        }
+        if let Some(authors) = self.authors {
+            cols.set_as("authors", &authors)?;
+        }
+        if let Some(summary) = self.summary {
+            cols.set_as("summary", &summary)?;
+        }
+        if let Some(content) = self.content {
+            cols.set_as("content", &content)?;
+        }
+        if let Some(license) = self.license {
+            cols.set_as("license", &license)?;
+        }
+
+        if cols.is_empty() {
+            return Err(anyhow::Error::new(HTTPError::new(
+                400,
+                "No fields to update".to_string(),
+            )));
+        }
+
+        Ok(cols)
+    }
 }
 
 pub async fn update_creation(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<CreateCreationInput>,
+    to: TypedObject<UpdateCreationInput>,
 ) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
-    let (to, input) = to.separate();
+    let (to, input) = to.unwrap_type();
     input.validate()?;
 
-    let now = (unix_ms() / 1000) as i64;
-    let mut doc = db::Creation {
-        gid: xid::Id::from_str(&input.gid).unwrap(),
-        id: xid::new(),
-        version: 1,
-        language: Language::from_str(&input.language).unwrap_or_default(),
-        creator: ctx.user,
-        created_at: now,
-        updated_at: now,
-        original_url: input.original_url.unwrap_or_default(),
-        genre: input.genre.unwrap_or_default(),
-        title: input.title,
-        description: input.description.unwrap_or_default(),
-        cover: input.cover.unwrap_or_default(),
-        keywords: input.keywords.unwrap_or_default(),
-        labels: input.labels.unwrap_or_default(),
-        authors: input.authors.unwrap_or_default(),
-        summary: input.summary.unwrap_or_default(),
-        content: input.content,
-        license: input.license.unwrap_or_default(),
-        ..Default::default()
-    };
+    let id = xid::Id::from_str(&input.id).unwrap(); // validated
+    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let mut doc = db::Creation::with_pk(gid, id);
+    let updated_at = input.updated_at;
+    let cols = input.into()?;
 
-    doc.save(&app.scylla).await?;
+    let update_content = cols.has("content");
+    doc.update(&app.scylla, cols, updated_at).await?;
+    doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
+    if update_content {
+        doc._fields.push("version".to_string());
+    }
     ctx.set_kvs(vec![
         ("action", "create_creation".into()),
         ("gid", doc.gid.to_string().into()),
@@ -339,7 +370,7 @@ pub async fn delete_creation(
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: TypedObject<()>,
     input: Query<QueryIdVersion>,
-) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+) -> Result<TypedObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
 
     let id = xid::Id::from_str(&input.id).unwrap(); // validated
@@ -353,6 +384,6 @@ pub async fn delete_creation(
     .await;
 
     let mut doc = db::Creation::with_pk(gid, id);
-    doc.delete(&app.scylla, input.version).await?;
-    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
+    let res = doc.delete(&app.scylla, input.version).await?;
+    Ok(to.with(SuccessResponse::new(res)))
 }

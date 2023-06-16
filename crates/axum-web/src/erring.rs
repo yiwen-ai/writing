@@ -82,7 +82,7 @@ impl From<anyhow::Error> for HTTPError {
         match err.downcast::<Self>() {
             Ok(err) => err,
             Err(sel) => match sel.downcast::<SingleRowError>() {
-                Ok(err) => HTTPError::new(404, format!("{:?}", err)),
+                Ok(_) => HTTPError::new(404, "data not found".to_string()),
                 Err(sel) => HTTPError::new(500, format!("{:?}", sel)),
             },
         }

@@ -25,7 +25,7 @@ pub enum TypedObject<T> {
 }
 
 impl<S> TypedObject<S> {
-    pub fn separate(self) -> (TypedObject<()>, S) {
+    pub fn unwrap_type(self) -> (TypedObject<()>, S) {
         match self {
             TypedObject::Json(v) => (TypedObject::Json(()), v),
             TypedObject::Cbor(v) => (TypedObject::Cbor(()), v),

@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
                     "/",
                     routing::post(api::creation::create_creation)
                         .get(api::creation::get_creation)
-                        .patch(todo)
+                        .patch(api::creation::update_creation)
                         .delete(api::creation::delete_creation),
                 )
                 .route("/list", routing::post(api::creation::list_creation))

@@ -28,6 +28,10 @@ impl ColumnsMap {
         self.0.contains_key(key)
     }
 
+    pub fn keys(&self) -> Vec<String> {
+        self.0.keys().cloned().collect()
+    }
+
     pub fn get(&self, key: &str) -> Option<&CqlValue> {
         match self.0.get(key) {
             Some(v) => Some(v),
