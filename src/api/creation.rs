@@ -339,19 +339,64 @@ pub async fn update_creation(
     let mut doc = db::Creation::with_pk(gid, id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
-
-    let update_content = cols.has("content");
-    doc.update(&app.scylla, cols, updated_at).await?;
-    doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
-    if update_content {
-        doc._fields.push("version".to_string());
-    }
     ctx.set_kvs(vec![
-        ("action", "create_creation".into()),
+        ("action", "update_creation".into()),
         ("gid", doc.gid.to_string().into()),
         ("id", doc.id.to_string().into()),
     ])
     .await;
+
+    let update_content = cols.has("content");
+    let ok = doc.update(&app.scylla, cols, updated_at).await?;
+    if !ok {
+        return Err(HTTPError::new(409, "Creation update failed".to_string()));
+    }
+
+    doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
+    if update_content {
+        doc._fields.push("version".to_string());
+    }
+
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateStatusInput {
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub id: String,
+    #[validate(length(equal = 20), custom = "validate_xid")]
+    pub gid: String,
+    #[validate(range(min = -1, max = 2))]
+    pub status: i8,
+    pub updated_at: i64,
+}
+
+pub async fn update_status(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: TypedObject<UpdateStatusInput>,
+) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.unwrap_type();
+    input.validate()?;
+
+    let id = xid::Id::from_str(&input.id).unwrap(); // validated
+    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let mut doc = db::Creation::with_pk(gid, id);
+    ctx.set_kvs(vec![
+        ("action", "update_status".into()),
+        ("gid", doc.gid.to_string().into()),
+        ("id", doc.id.to_string().into()),
+    ])
+    .await;
+
+    let ok = doc
+        .update_status(&app.scylla, input.status, input.updated_at)
+        .await?;
+    if !ok {
+        return Err(HTTPError::new(409, "Creation update failed".to_string()));
+    }
+
+    doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 

@@ -191,12 +191,90 @@ impl Creation {
         Ok(extract_applied(res))
     }
 
+    pub async fn update_status(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        status: i8,
+        updated_at: i64,
+    ) -> anyhow::Result<bool> {
+        self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
+            .await?;
+        if self.updated_at != updated_at {
+            return Err(anyhow::Error::new(HTTPError::new(
+                409,
+                format!(
+                    "Creation updated_at conflict, expected updated_at {}, got {}",
+                    self.updated_at, updated_at
+                ),
+            )));
+        }
+        if self.status == status {
+            return Ok(true); // no need to update
+        }
+
+        match self.status {
+            -1 if !(0..=1).contains(&status) => {
+                return Err(anyhow::Error::new(HTTPError::new(
+                    400,
+                    format!(
+                        "Creation status is {}, expected update to 0 or 1, got {}",
+                        self.status, status
+                    ),
+                )));
+            }
+            0 if !(-1..=1).contains(&status) => {
+                return Err(anyhow::Error::new(HTTPError::new(
+                    400,
+                    format!(
+                        "Creation status is {}, expected update to -1 or 1, got {}",
+                        self.status, status
+                    ),
+                )));
+            }
+            1 if !(-1..=2).contains(&status) => {
+                return Err(anyhow::Error::new(HTTPError::new(
+                    400,
+                    format!(
+                        "Creation status is {}, expected update to -1, 0 or 2, got {}",
+                        self.status, status
+                    ),
+                )));
+            }
+            2 if !(-1..=1).contains(&status) => {
+                return Err(anyhow::Error::new(HTTPError::new(
+                    400,
+                    format!(
+                        "Creation status is {}, expected update to -1, 0 or 1, got {}",
+                        self.status, status
+                    ),
+                )));
+            }
+            _ => {} // continue
+        }
+
+        let new_updated_at = (unix_ms() / 1000) as i64;
+        let query =
+            "UPDATE creation SET status=?,updated_at=? WHERE gid=? AND id=? IF updated_at=?";
+        let params = (
+            status,
+            new_updated_at,
+            self.gid.as_bytes(),
+            self.id.as_bytes(),
+            updated_at,
+        );
+
+        let res = db.execute(query, params).await?;
+        self.updated_at = new_updated_at;
+        self.status = status;
+        Ok(extract_applied(res))
+    }
+
     pub async fn update(
         &mut self,
         db: &scylladb::ScyllaDB,
         cols: ColumnsMap,
         updated_at: i64,
-    ) -> anyhow::Result<i64> {
+    ) -> anyhow::Result<bool> {
         let valid_fields = vec![
             "title",
             "description",
@@ -274,10 +352,10 @@ impl Creation {
         params.push(CqlValue::Blob(self.id.as_bytes().to_vec()));
         params.push(CqlValue::BigInt(updated_at));
 
-        let _ = db.execute(query, params).await?;
+        let res = db.execute(query, params).await?;
         self.updated_at = new_updated_at;
         self.version = new_version;
-        Ok(new_updated_at)
+        Ok(extract_applied(res))
     }
 
     pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
@@ -471,7 +549,7 @@ mod tests {
             let mut cols = ColumnsMap::new();
             cols.set_as("title", &"title 1".to_string())?;
             let res = doc.update(db, cols, doc.updated_at).await?;
-            assert!(res >= doc.updated_at);
+            assert!(res);
             assert_eq!(doc.version, 1);
 
             let mut cols = ColumnsMap::new();
@@ -505,7 +583,7 @@ mod tests {
             cols.set_as("content", &content)?;
             cols.set_as("license", &"license 2".to_string())?;
             let res = doc.update(db, cols, doc.updated_at).await?;
-            assert!(res >= doc.updated_at);
+            assert!(res);
             assert_eq!(doc.version, 2);
         }
 

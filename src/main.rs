@@ -67,9 +67,11 @@ async fn main() -> anyhow::Result<()> {
                         .delete(api::creation::delete_creation),
                 )
                 .route("/list", routing::post(api::creation::list_creation))
-                .route("/archive", routing::patch(todo)) // github return 302 to client
-                .route("/unarchive", routing::patch(todo)) // github return 302
-                .route("/content", routing::patch(todo)), // patch content
+                .route(
+                    "/update_status",
+                    routing::patch(api::creation::update_status),
+                )
+                .route("/patch_content", routing::patch(todo)), // patch content
         )
         .nest(
             "/v1/publication",
