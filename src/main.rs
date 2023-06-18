@@ -1,30 +1,11 @@
 use std::{net::SocketAddr, sync::Arc};
-
-use axum::{
-    http::header::HeaderName,
-    middleware,
-    response::{IntoResponse, Response},
-    routing, Router,
-};
 use structured_logger::{async_json::new_writer, Builder};
 use tokio::{io, signal};
-use tower::ServiceBuilder;
-use tower_http::{
-    catch_panic::CatchPanicLayer, compression::CompressionLayer,
-    propagate_header::PropagateHeaderLayer,
-};
 
 mod api;
 mod conf;
 mod db;
-
-use axum_web::context;
-use axum_web::erring;
-use axum_web::object;
-
-pub async fn todo() -> Response {
-    (erring::HTTPError::new(501, "TODO".to_string())).into_response()
-}
+mod router;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
@@ -35,87 +16,21 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     log::debug!("{:?}", cfg);
+    let server_cfg = cfg.server.clone();
+    let server_env = cfg.env.clone();
+    let (app_state, app) = router::new(cfg).await?;
 
-    let keyspace = if cfg.env == "test" {
-        "writing_test"
-    } else {
-        "writing"
-    };
-    let scylla = db::scylladb::ScyllaDB::new(cfg.scylla, keyspace).await?;
-
-    let app_state = Arc::new(api::AppState { scylla });
-
-    let mds = ServiceBuilder::new()
-        .layer(middleware::from_fn(context::middleware))
-        .layer(CatchPanicLayer::new())
-        .layer(CompressionLayer::new())
-        .layer(PropagateHeaderLayer::new(HeaderName::from_static(
-            "x-request-id",
-        )));
-
-    let app = Router::new()
-        .route("/", routing::get(api::version))
-        .route("/healthz", routing::get(api::healthz))
-        .nest(
-            "/v1/creation",
-            Router::new()
-                .route(
-                    "/",
-                    routing::post(api::creation::create_creation)
-                        .get(api::creation::get_creation)
-                        .patch(api::creation::update_creation)
-                        .delete(api::creation::delete_creation),
-                )
-                .route("/list", routing::post(api::creation::list_creation))
-                .route(
-                    "/update_status",
-                    routing::patch(api::creation::update_status),
-                )
-                .route("/patch_content", routing::patch(todo)), // patch content
-        )
-        .nest(
-            "/v1/publication",
-            Router::new()
-                .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                .route("/list", routing::post(todo))
-                .nest(
-                    "/comment",
-                    Router::new()
-                        .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                        .route("/list", routing::post(todo)),
-                ),
-        )
-        .nest(
-            "/v1/collection",
-            Router::new()
-                .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                .route("/list", routing::post(todo)),
-        )
-        .nest(
-            "/v1/sys",
-            Router::new()
-                .route("/creation", routing::patch(todo).delete(todo))
-                .route("/publication", routing::patch(todo).delete(todo))
-                .route("/publication/comment", routing::patch(todo).delete(todo))
-                .route("/collection", routing::patch(todo).delete(todo)),
-        )
-        .route_layer(mds)
-        .with_state(app_state.clone());
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], cfg.server.port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], server_cfg.port));
     log::info!(
         "{}@{} start {} at {}",
         api::APP_NAME,
         api::APP_VERSION,
-        cfg.env,
+        server_env,
         &addr
     );
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
-        .with_graceful_shutdown(shutdown_signal(
-            app_state.clone(),
-            cfg.server.graceful_shutdown,
-        ))
+        .with_graceful_shutdown(shutdown_signal(app_state, server_cfg.graceful_shutdown))
         .await?;
 
     Ok(())

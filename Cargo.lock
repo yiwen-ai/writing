@@ -2614,6 +2614,7 @@ dependencies = [
  "ciborium-io",
  "config",
  "futures",
+ "hyper",
  "isolang",
  "libflate",
  "log",

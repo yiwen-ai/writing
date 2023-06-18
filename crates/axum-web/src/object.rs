@@ -12,8 +12,12 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use serde::{de::DeserializeOwned, ser::Serializer, Serialize};
-use std::{collections::HashSet, error::Error, ops::Deref};
+use serde::{
+    de::{self, DeserializeOwned},
+    ser::Serializer,
+    Deserialize, Serialize,
+};
+use std::{collections::HashSet, error::Error, fmt, ops::Deref, str::FromStr};
 
 use crate::encoding::Encoding;
 use crate::erring::HTTPError;
@@ -25,6 +29,13 @@ pub enum TypedObject<T> {
 }
 
 impl<S> TypedObject<S> {
+    pub fn unwrap(self) -> S {
+        match self {
+            TypedObject::Json(v) => v,
+            TypedObject::Cbor(v) => v,
+        }
+    }
+
     pub fn unwrap_type(self) -> (TypedObject<()>, S) {
         match self {
             TypedObject::Json(v) => (TypedObject::Json(()), v),
@@ -136,6 +147,219 @@ impl Serialize for TypedObject<isolang::Language> {
             TypedObject::Json(v) => serializer.serialize_str(v.to_name()),
             TypedObject::Cbor(v) => serializer.serialize_str(v.to_639_3()),
         }
+    }
+}
+
+struct TypedObjectBytesVisitor;
+
+impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
+    type Value = TypedObject<Vec<u8>>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a byte array or a no pad base64url string")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(TypedObject::Cbor(v.to_vec()))
+    }
+
+    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(TypedObject::Cbor(v.to_vec()))
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(TypedObject::Cbor(v))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let v = general_purpose::URL_SAFE_NO_PAD
+            .decode(v)
+            .map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(v))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let v = general_purpose::URL_SAFE_NO_PAD
+            .decode(v)
+            .map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(v))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let v = general_purpose::URL_SAFE_NO_PAD
+            .decode(v)
+            .map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(v))
+    }
+}
+
+impl<'de> Deserialize<'de> for TypedObject<Vec<u8>> {
+    fn deserialize<D>(deserializer: D) -> Result<TypedObject<Vec<u8>>, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(TypedObjectBytesVisitor)
+    }
+}
+
+struct TypedObjectLanguageVisitor;
+
+impl<'de> de::Visitor<'de> for TypedObjectLanguageVisitor {
+    type Value = TypedObject<isolang::Language>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a ISO 639-1, ISO 639-3 or English language name string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
+        match v.len() {
+            3 => Ok(TypedObject::Cbor(id)),
+            _ => Ok(TypedObject::Json(id)),
+        }
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
+        match v.len() {
+            3 => Ok(TypedObject::Cbor(id)),
+            _ => Ok(TypedObject::Json(id)),
+        }
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = isolang::Language::from_str(&v).map_err(de::Error::custom)?;
+        match v.len() {
+            3 => Ok(TypedObject::Cbor(id)),
+            _ => Ok(TypedObject::Json(id)),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TypedObject<isolang::Language> {
+    fn deserialize<D>(deserializer: D) -> Result<TypedObject<isolang::Language>, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(TypedObjectLanguageVisitor)
+    }
+}
+
+struct TypedObjectXidVisitor;
+
+impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
+    type Value = TypedObject<xid::Id>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a 12 bytes array or a 20 length xid string")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 12 {
+            Err(de::Error::custom(format!(
+                "expected value length 12, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(v);
+            Ok(TypedObject::Cbor(xid::Id(bytes)))
+        }
+    }
+
+    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 12 {
+            Err(de::Error::custom(format!(
+                "expected value length 12, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(v);
+            Ok(TypedObject::Cbor(xid::Id(bytes)))
+        }
+    }
+
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if v.len() != 12 {
+            Err(de::Error::custom(format!(
+                "expected value length 12, got {:?}",
+                v.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 12];
+            bytes.copy_from_slice(&v);
+            Ok(TypedObject::Cbor(xid::Id(bytes)))
+        }
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = xid::Id::from_str(v).map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(id))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = xid::Id::from_str(v).map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(id))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let id = xid::Id::from_str(&v).map_err(de::Error::custom)?;
+        Ok(TypedObject::Json(id))
+    }
+}
+
+impl<'de> Deserialize<'de> for TypedObject<xid::Id> {
+    fn deserialize<D>(deserializer: D) -> Result<TypedObject<xid::Id>, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(TypedObjectXidVisitor)
     }
 }
 

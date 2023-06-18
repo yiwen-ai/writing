@@ -1,15 +1,18 @@
 use isolang::Language;
+use std::{
+    collections::HashSet,
+    time::{Duration, SystemTime},
+};
+
+use axum_web::context::unix_ms;
+use axum_web::erring::HTTPError;
 use scylla_orm::ColumnsMap;
 use scylla_orm_macros::CqlOrm;
-use std::collections::HashSet;
-use std::time::{Duration, SystemTime};
 
-use super::{
+use crate::db::{
     scylladb,
     scylladb::{extract_applied, CqlValue, Query},
 };
-use crate::context::unix_ms;
-use crate::erring::HTTPError;
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct CreationIndex {
@@ -21,7 +24,7 @@ pub struct CreationIndex {
 
 impl CreationIndex {
     pub fn with_pk(id: xid::Id) -> Self {
-        CreationIndex {
+        Self {
             id,
             ..Default::default()
         }
@@ -88,7 +91,7 @@ pub struct Creation {
 
 impl Creation {
     pub fn with_pk(gid: xid::Id, id: xid::Id) -> Self {
-        Creation {
+        Self {
             gid,
             id,
             ..Default::default()
@@ -162,7 +165,7 @@ impl Creation {
             )));
         }
 
-        let now = (unix_ms() / 1000) as i64;
+        let now = unix_ms() as i64;
         self.created_at = now;
         self.updated_at = now;
         self.version = 1;
@@ -252,7 +255,7 @@ impl Creation {
             _ => {} // continue
         }
 
-        let new_updated_at = (unix_ms() / 1000) as i64;
+        let new_updated_at = unix_ms() as i64;
         let query =
             "UPDATE creation SET status=?,updated_at=? WHERE gid=? AND id=? IF updated_at=?";
         let params = (
@@ -279,7 +282,6 @@ impl Creation {
             "title",
             "description",
             "cover",
-            "summary",
             "keywords",
             "labels",
             "authors",
@@ -330,7 +332,7 @@ impl Creation {
         let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + incr);
         let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + incr + 3);
 
-        let new_updated_at = (unix_ms() / 1000) as i64;
+        let new_updated_at = unix_ms() as i64;
         let mut new_version = self.version;
         set_fields.push("updated_at=?".to_string());
         params.push(CqlValue::BigInt(new_updated_at));
@@ -375,7 +377,7 @@ impl Creation {
         }
 
         self.get_one(db, Vec::new()).await?;
-        self.updated_at = (unix_ms() / 1000) as i64;
+        self.updated_at = unix_ms() as i64;
 
         let fields = Self::fields();
         self._fields = fields.iter().map(|f| f.to_string()).collect();
@@ -475,7 +477,8 @@ mod tests {
     use std::str::FromStr;
     use tokio::sync::OnceCell;
 
-    use crate::{conf, erring};
+    use crate::conf;
+    use axum_web::erring;
 
     use super::*;
 

@@ -17,11 +17,11 @@ CREATE TABLE IF NOT EXISTS creation (
     version          SMALLINT,    -- creation version
     language         ASCII,       -- creation's language, ISO 639-3
     creator          BLOB,        -- user id who create the creation.
-    created_at       BIGINT,      -- create at
+    created_at       BIGINT,      -- create at, unix time, ms
     updated_at       BIGINT,      -- update at
     active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
-    genre            LIST<TEXT>, -- genre
+    genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
     description      TEXT,        -- description
     cover            TEXT,        -- cover url
@@ -49,13 +49,18 @@ CREATE TABLE IF NOT EXISTS publication (
     status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
-    published_at BIGINT,     -- published at
-    model        TEXT,      -- AI model name, default to empty
+    updated_at   BIGINT,     -- update at
+    model        TEXT,       -- AI model name, default to empty
+    original_url TEXT,       -- original web url (https://xxxxxxx)
+    genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
     description  TEXT,       -- description
+    cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
+    authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
     content      BLOB,       -- content in CBOR format.
+    license      TEXT,       -- license url
     PRIMARY KEY (id, language, version)
 ) WITH CLUSTERING ORDER BY (language ASC, version DESC)
     AND caching = {'enabled': 'true'}
@@ -67,18 +72,24 @@ CREATE TABLE IF NOT EXISTS publication (
 CREATE TABLE IF NOT EXISTS publication_draft (
     gid          BLOB,       -- group id, publication draft belong to
     id           BLOB,       -- draft id
-    pid          BLOB,       -- publication id
+    cid          BLOB,       -- creation id
     language     ASCII,      -- draft's language, ISO 639-3
-    version      SMALLINT,   -- publication version
+    version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
-    model        TEXT,      -- AI model name, default to empty
+    updated_at   BIGINT,     -- update at
+    model        TEXT,       -- AI model name, default to empty
+    original_url TEXT,       -- original web url (https://xxxxxxx)
+    genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
     description  TEXT,       -- description
+    cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
+    authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
     content      BLOB,       -- content in CBOR format.
+    license      TEXT,       -- license url
     PRIMARY KEY (gid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND caching = {'enabled': 'false'}
@@ -90,7 +101,7 @@ CREATE TABLE IF NOT EXISTS publication_draft (
 CREATE INDEX publication_draft_gid_status ON publication_draft ((gid), status);
 
 CREATE TABLE IF NOT EXISTS comment (
-    pid         BLOB,    -- publication id comment to, 12 bytes XID
+    cid         BLOB,    -- creation id comment to, 12 bytes XID
     id          BLOB,    -- comment id, 12 bytes XID
     language    ASCII,   -- comment's language
     status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
@@ -100,7 +111,7 @@ CREATE TABLE IF NOT EXISTS comment (
     approved_at BIGINT,  -- approved at.
     content     BLOB,    -- comment content in CBOR format.
     reply       BLOB,    -- optional, comment id reply to
-    PRIMARY KEY (pid, id)
+    PRIMARY KEY (cid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND caching = {'enabled': 'true'}
     AND comment = 'publication''s comments'
@@ -108,13 +119,13 @@ CREATE TABLE IF NOT EXISTS comment (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX comment_pid_status ON creation ((pid), status);
+CREATE INDEX comment_cid_status ON comment ((cid), status);
 
 CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
-    pid         BLOB,        -- publication id, 12 bytes XID
-    version     SMALLINT,    -- publication version
+    cid         BLOB,        -- creation id, 12 bytes XID
+    version     SMALLINT,    -- creation version
     status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred
     updated_at  BIGINT,      -- update at, unix time with second precision.
     genre       LIST<TEXT>, -- publication (creation) genre
@@ -170,13 +181,18 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
     status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
-    published_at BIGINT,     -- published at
-    model        TEXT,      -- AI model name, default to empty
+    updated_at   BIGINT,     -- update at
+    model        TEXT,       -- AI model name, default to empty
+    original_url TEXT,       -- original web url (https://xxxxxxx)
+    genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
     description  TEXT,       -- description
+    cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
+    authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
     content      BLOB,       -- content in CBOR format.
+    license      TEXT,       -- license url
     PRIMARY KEY (id, language, version)
 ) WITH CLUSTERING ORDER BY (language ASC, version DESC)
     AND caching = {'enabled': 'false'}
@@ -188,18 +204,24 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
 CREATE TABLE IF NOT EXISTS deleted_publication_draft (
     gid          BLOB,       -- group id, publication draft belong to
     id           BLOB,       -- draft id
-    pid          BLOB,       -- publication id
+    cid          BLOB,       -- creation id
     language     ASCII,      -- draft's language, ISO 639-3
-    version      SMALLINT,   -- publication version
+    version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
-    model        TEXT,      -- AI model name, default to empty
+    updated_at   BIGINT,     -- update at
+    model        TEXT,       -- AI model name, default to empty
+    original_url TEXT,       -- original web url (https://xxxxxxx)
+    genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
     description  TEXT,       -- description
+    cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
+    authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
     content      BLOB,       -- content in CBOR format.
+    license      TEXT,       -- license url
     PRIMARY KEY (gid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND caching = {'enabled': 'false'}
@@ -209,7 +231,7 @@ CREATE TABLE IF NOT EXISTS deleted_publication_draft (
     AND default_time_to_live = 17280000;
 
 CREATE TABLE IF NOT EXISTS deleted_comment (
-    pid         BLOB,    -- publication id comment to, 12 bytes XID
+    cid         BLOB,    -- creation id comment to, 12 bytes XID
     id          BLOB,    -- comment id, 12 bytes XID
     language    ASCII,   -- comment's language
     status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
@@ -219,7 +241,7 @@ CREATE TABLE IF NOT EXISTS deleted_comment (
     approved_at BIGINT,  -- approved at.
     content     BLOB,    -- comment content in CBOR format.
     reply       BLOB,    -- optional, comment id reply to
-    PRIMARY KEY (pid, id)
+    PRIMARY KEY (cid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND caching = {'enabled': 'false'}
     AND comment = 'publication''s comments'
@@ -230,7 +252,7 @@ CREATE TABLE IF NOT EXISTS deleted_comment (
 CREATE TABLE IF NOT EXISTS deleted_collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
-    pid         BLOB,        -- publication id, 12 bytes XID
+    cid         BLOB,        -- creation id, 12 bytes XID
     version     SMALLINT,    -- publication version
     status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred
     updated_at  BIGINT,      -- update at, unix time with second precision.

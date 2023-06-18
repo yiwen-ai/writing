@@ -4,28 +4,28 @@ use axum::{
     Json,
 };
 use scylla::transport::query_result::SingleRowError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{convert::From, error::Error, fmt, fmt::Debug};
 use validator::{ValidationError, ValidationErrors};
 
 /// ErrorResponse is the response body for error.
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ErrorResponse {
     pub error: HTTPError,
 }
 
 /// SuccessResponse is the response body for success.
-#[derive(Serialize)]
-pub struct SuccessResponse<S: Serialize> {
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct SuccessResponse<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_page_token: Option<String>,
-    pub result: S,
+    pub result: T,
 }
 
-impl<S: Serialize> SuccessResponse<S> {
-    pub fn new(result: S) -> Self {
+impl<T> SuccessResponse<T> {
+    pub fn new(result: T) -> Self {
         SuccessResponse {
             total_size: None,
             next_page_token: None,
@@ -34,7 +34,7 @@ impl<S: Serialize> SuccessResponse<S> {
     }
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct HTTPError {
     pub code: u16,
     pub message: String,

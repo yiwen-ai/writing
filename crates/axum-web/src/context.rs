@@ -1,7 +1,7 @@
 use axum::{
-    http::{HeaderMap, Request, StatusCode},
+    http::{HeaderMap, Request},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::{Response},
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Instant};
@@ -13,16 +13,18 @@ pub use structured_logger::unix_ms;
 pub struct ReqContext {
     pub rid: String,   // from x-request-id header
     pub user: xid::Id, // from x-user-id header
+    pub rating: i8,    // from x-max-rating header, 0 if not present
     pub unix_ms: u64,
     pub start: Instant,
     pub kv: RwLock<BTreeMap<String, Value>>,
 }
 
 impl ReqContext {
-    pub fn new(rid: &str, user: xid::Id) -> Self {
+    pub fn new(rid: &str, user: xid::Id, rating: i8) -> Self {
         Self {
             rid: rid.to_string(),
             user,
+            rating,
             unix_ms: unix_ms(),
             start: Instant::now(),
             kv: RwLock::new(BTreeMap::new()),
@@ -47,18 +49,12 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let uri = req.uri().to_string();
     let rid = extract_header(req.headers(), "x-request-id", || Uuid::new_v4().to_string());
     let user = extract_header(req.headers(), "x-user-id", || "".to_string());
-    let uid = match xid::Id::from_str(&user) {
-        Ok(id) => id,
-        Err(err) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                format!("Invalid x-user-id, {}", err),
-            )
-                .into_response()
-        }
-    };
+    let rating = extract_header(req.headers(), "x-max-rating", || "0".to_string());
+    let rating = i8::from_str(&rating).unwrap_or(0);
 
-    let ctx = Arc::new(ReqContext::new(&rid, uid));
+    let uid = xid::Id::from_str(&user).unwrap_or_default();
+
+    let ctx = Arc::new(ReqContext::new(&rid, uid, rating));
     req.extensions_mut().insert(ctx.clone());
 
     let res = next.run(req).await;
@@ -69,6 +65,7 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         uri = uri,
         rid = rid,
         user = user,
+        rating = rating,
         status = status,
         start = ctx.unix_ms,
         elapsed = ctx.start.elapsed().as_millis() as u64,
