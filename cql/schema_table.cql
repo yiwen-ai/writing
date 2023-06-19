@@ -125,12 +125,14 @@ CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
     cid         BLOB,        -- creation id, 12 bytes XID
+    language    ASCII,       -- creation language
     version     SMALLINT,    -- creation version
-    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred
+    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
     updated_at  BIGINT,      -- update at, unix time with second precision.
-    genre       LIST<TEXT>, -- publication (creation) genre
+    genre       LIST<TEXT>,  -- publication (creation) genre
     title       TEXT,        -- publication title
     description TEXT,        -- publication description
+    cover       TEXT,        -- cover url
     summary     TEXT,        -- publication summary
     labels      LIST<TEXT>,  -- labels for collections management
     PRIMARY KEY (uid, id)
@@ -253,12 +255,14 @@ CREATE TABLE IF NOT EXISTS deleted_collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
     cid         BLOB,        -- creation id, 12 bytes XID
-    version     SMALLINT,    -- publication version
-    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred
+    language    ASCII,       -- creation language
+    version     SMALLINT,    -- creation version
+    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
     updated_at  BIGINT,      -- update at, unix time with second precision.
-    genre       LIST<TEXT>, -- publication (creation) genre
+    genre       LIST<TEXT>,  -- publication (creation) genre
     title       TEXT,        -- publication title
     description TEXT,        -- publication description
+    cover       TEXT,        -- cover url
     summary     TEXT,        -- publication summary
     labels      LIST<TEXT>,  -- labels for collections management
     PRIMARY KEY (uid, id)

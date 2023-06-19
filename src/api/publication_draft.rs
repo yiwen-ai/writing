@@ -270,8 +270,13 @@ pub async fn get(
 ) -> Result<PackObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
     input.validate()?;
 
+    let gid = input
+        .gid
+        .as_ref()
+        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
+
     let id = *input.id.to_owned();
-    let gid = *input.gid.to_owned();
+    let gid = *gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_publication_draft".into()),
@@ -300,8 +305,12 @@ pub async fn list(
     let (to, input) = to.unpack();
     input.validate()?;
 
+    let gid = input
+        .gid
+        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
+
     let page_size = input.page_size.unwrap_or(10);
-    let gid = *input.gid.to_owned(); // validated
+    let gid = *gid.to_owned(); // validated
     ctx.set_kvs(vec![
         ("action", "list_publication_draft".into()),
         ("gid", gid.to_string().into()),
@@ -443,8 +452,12 @@ pub async fn update_status(
     let (to, input) = to.unpack();
     input.validate()?;
 
+    let gid = input
+        .gid
+        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
+
     let id = *input.id.to_owned(); // validated
-    let gid = *input.gid.to_owned(); // validated
+    let gid = *gid.to_owned(); // validated
     let mut doc = db::PublicationDraft::with_pk(gid, id);
     ctx.set_kvs(vec![
         ("action", "update_publication_draft_status".into()),
@@ -475,8 +488,13 @@ pub async fn delete(
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
 
+    let gid = input
+        .gid
+        .as_ref()
+        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
+
     let id = *input.id.to_owned();
-    let gid = *input.gid.to_owned();
+    let gid = *gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_publication_draft".into()),

@@ -7,6 +7,7 @@ use axum_web::object::PackObject;
 
 use crate::db;
 
+pub mod collection;
 pub mod creation;
 pub mod publication;
 pub mod publication_draft;
@@ -67,14 +68,14 @@ pub async fn healthz(to: PackObject<()>, State(app): State<Arc<AppState>>) -> Pa
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryIdGid {
     pub id: PackObject<xid::Id>,
-    pub gid: PackObject<xid::Id>,
+    pub gid: Option<PackObject<xid::Id>>,
     pub fields: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryIdGidVersion {
     pub id: PackObject<xid::Id>,
-    pub gid: PackObject<xid::Id>,
+    pub gid: Option<PackObject<xid::Id>>,
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
 }
@@ -90,7 +91,7 @@ pub struct QueryIdLanguageVersion {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct Pagination {
-    pub gid: PackObject<xid::Id>,
+    pub gid: Option<PackObject<xid::Id>>,
     pub page_token: Option<PackObject<xid::Id>>,
     #[validate(range(min = 2, max = 1000))]
     pub page_size: Option<u16>,
@@ -102,7 +103,7 @@ pub struct Pagination {
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateStatusInput {
     pub id: PackObject<xid::Id>,
-    pub gid: PackObject<xid::Id>,
+    pub gid: Option<PackObject<xid::Id>>,
     #[validate(range(min = -1, max = 2))]
     pub status: i8,
     pub updated_at: i64,

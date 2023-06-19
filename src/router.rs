@@ -100,8 +100,14 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
         .nest(
             "/v1/collection",
             Router::new()
-                .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                .route("/list", routing::post(todo)),
+                .route(
+                    "/",
+                    routing::post(api::collection::create)
+                        .get(api::collection::get)
+                        .patch(api::collection::update)
+                        .delete(api::collection::delete),
+                )
+                .route("/list", routing::post(api::collection::list)),
         )
         .nest(
             "/v1/sys",
@@ -127,9 +133,9 @@ mod tests {
     use base64::{engine::general_purpose, Engine as _};
     use ciborium::cbor;
     use serde_json::json;
+    use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
-    use std::{net::SocketAddr};
     use tokio::sync::OnceCell;
     use tokio::time;
 
