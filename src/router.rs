@@ -138,15 +138,15 @@ mod tests {
 
     use super::*;
 
-    static SERVER: OnceCell<(tokio::task::JoinHandle<()>, SocketAddr)> = OnceCell::const_new();
+    static SERVER: OnceCell<SocketAddr> = OnceCell::const_new();
 
-    async fn get_server() -> (tokio::task::JoinHandle<()>, SocketAddr) {
+    async fn get_server() -> SocketAddr {
         let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
         let listener = TcpListener::bind("0.0.0.0:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (_, app) = new(cfg.clone()).await.unwrap();
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let _ = axum::Server::from_tcp(listener)
                 .unwrap()
                 .serve(app.into_make_service())
@@ -154,7 +154,7 @@ mod tests {
         });
 
         time::sleep(time::Duration::from_millis(300)).await;
-        (handle, addr)
+        addr
     }
 
     fn encode_cbor(val: &ciborium::Value) -> anyhow::Result<Vec<u8>> {
@@ -166,7 +166,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn healthz_api_works() -> anyhow::Result<()> {
-        let (_, addr) = SERVER.get_or_init(get_server).await;
+        let addr = SERVER.get_or_init(get_server).await;
         let client = reqwest::ClientBuilder::new().gzip(true).build().unwrap();
 
         let res = client
@@ -209,7 +209,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn api_works_with_json_and_cbor() -> anyhow::Result<()> {
-        let (_, addr) = SERVER.get_or_init(get_server).await;
+        let addr = SERVER.get_or_init(get_server).await;
         let client = reqwest::ClientBuilder::new().gzip(true).build().unwrap();
 
         let content = encode_cbor(

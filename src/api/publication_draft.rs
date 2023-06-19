@@ -4,31 +4,23 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{convert::From, str::FromStr, sync::Arc};
+use std::{convert::From, sync::Arc};
 use validator::Validate;
 
 use crate::db;
 use axum_web::context::ReqContext;
 use axum_web::erring::{HTTPError, SuccessResponse};
-use axum_web::object::TypedObject;
-
+use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{
-    validate_cbor, validate_language, validate_xid, AppState, Pagination, QueryIdGid,
-    QueryIdGidVersion, UpdateStatusInput,
-};
+use super::{AppState, Pagination, QueryIdGid, QueryIdGidVersion, UpdateStatusInput};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreatePublicationDraftInput {
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub gid: String,
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub cid: String,
-    #[validate(length(min = 2), custom = "validate_language")]
-    pub from_language: String,
-    #[validate(length(min = 2), custom = "validate_language")]
-    pub language: String,
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub from_language: PackObject<isolang::Language>,
+    pub language: PackObject<isolang::Language>,
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     #[validate(length(min = 3, max = 16))]
@@ -43,26 +35,24 @@ pub struct CreatePublicationDraftInput {
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
-    #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
-    #[serde(with = "serde_bytes")]
-    pub content: Vec<u8>,
+    pub content: PackObject<Vec<u8>>,
     #[validate(url)]
     pub license: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PublicationDraftOutput {
-    pub gid: TypedObject<xid::Id>,
-    pub id: TypedObject<xid::Id>,
-    pub cid: TypedObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    pub id: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<TypedObject<Language>>,
+    pub language: Option<PackObject<Language>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<TypedObject<xid::Id>>,
+    pub creator: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,13 +76,13 @@ pub struct PublicationDraftOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<TypedObject<Vec<u8>>>,
+    pub content: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 }
 
 impl PublicationDraftOutput {
-    fn from<T>(val: db::PublicationDraft, to: &TypedObject<T>) -> Self {
+    fn from<T>(val: db::PublicationDraft, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             gid: to.with(val.gid),
             id: to.with(val.id),
@@ -130,18 +120,18 @@ impl PublicationDraftOutput {
 pub async fn create(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<CreatePublicationDraftInput>,
-) -> Result<TypedObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<CreatePublicationDraftInput>,
+) -> Result<PackObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let from_language = Language::from_str(&input.language).unwrap();
+    let from_language = *input.language.to_owned();
 
     let mut draft = db::PublicationDraft {
-        gid: xid::Id::from_str(&input.gid).unwrap(),
+        gid: input.gid.unwrap(),
         id: xid::new(),
-        cid: xid::Id::from_str(&input.cid).unwrap(),
-        language: Language::from_str(&input.language).unwrap(),
+        cid: input.cid.unwrap(),
+        language: input.language.unwrap(),
         version: input.version,
         creator: ctx.user,
         model: input.model,
@@ -151,7 +141,7 @@ pub async fn create(
         keywords: input.keywords.unwrap_or_default(),
         authors: input.authors.unwrap_or_default(),
         summary: input.summary.unwrap_or_default(),
-        content: input.content,
+        content: input.content.unwrap(),
         license: input.license.unwrap_or_default(),
         ..Default::default()
     };
@@ -275,18 +265,18 @@ pub async fn create(
 pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdGid>,
-) -> Result<TypedObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap();
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_publication_draft".into()),
-        ("gid", input.gid.clone().into()),
-        ("id", input.id.clone().into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 
@@ -305,13 +295,13 @@ pub async fn get(
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<Pagination>,
-) -> Result<TypedObject<SuccessResponse<Vec<PublicationDraftOutput>>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationDraftOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
     let page_size = input.page_size.unwrap_or(10);
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let gid = *input.gid.to_owned(); // validated
     ctx.set_kvs(vec![
         ("action", "list_publication_draft".into()),
         ("gid", gid.to_string().into()),
@@ -319,7 +309,7 @@ pub async fn list(
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| xid::Id::from_str(&s).unwrap());
+    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::PublicationDraft::find(
         &app.scylla,
         gid,
@@ -347,13 +337,10 @@ pub async fn list(
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdatePublicationDraftInput {
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub id: String,
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub gid: String,
+    pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 2), custom = "validate_language")]
-    pub language: Option<String>,
+    pub language: Option<PackObject<isolang::Language>>,
     #[validate(length(min = 3, max = 16))]
     pub model: Option<String>,
     #[validate(length(min = 3, max = 512))]
@@ -368,8 +355,7 @@ pub struct UpdatePublicationDraftInput {
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
-    #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
-    pub content: Option<Vec<u8>>,
+    pub content: Option<PackObject<Vec<u8>>>,
     #[validate(url)]
     pub license: Option<String>,
 }
@@ -378,7 +364,7 @@ impl UpdatePublicationDraftInput {
     fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
         if let Some(language) = self.language {
-            cols.set_as("language", &language)?;
+            cols.set_as("language", language.as_ref())?;
         }
         if let Some(model) = self.model {
             cols.set_as("model", &model)?;
@@ -402,7 +388,7 @@ impl UpdatePublicationDraftInput {
             cols.set_as("summary", &summary)?;
         }
         if let Some(content) = self.content {
-            cols.set_as("content", &content)?;
+            cols.set_as("content", content.as_ref())?;
         }
         if let Some(license) = self.license {
             cols.set_as("license", &license)?;
@@ -422,13 +408,13 @@ impl UpdatePublicationDraftInput {
 pub async fn update(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<UpdatePublicationDraftInput>,
-) -> Result<TypedObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<UpdatePublicationDraftInput>,
+) -> Result<PackObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let mut doc = db::PublicationDraft::with_pk(gid, id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
@@ -452,13 +438,13 @@ pub async fn update(
 pub async fn update_status(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<UpdateStatusInput>,
-) -> Result<TypedObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<UpdateStatusInput>,
+) -> Result<PackObject<SuccessResponse<PublicationDraftOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned(); // validated
+    let gid = *input.gid.to_owned(); // validated
     let mut doc = db::PublicationDraft::with_pk(gid, id);
     ctx.set_kvs(vec![
         ("action", "update_publication_draft_status".into()),
@@ -484,18 +470,18 @@ pub async fn update_status(
 pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdGidVersion>,
-) -> Result<TypedObject<SuccessResponse<bool>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_publication_draft".into()),
-        ("gid", input.gid.clone().into()),
-        ("id", input.id.clone().into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 

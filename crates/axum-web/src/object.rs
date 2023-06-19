@@ -23,137 +23,147 @@ use crate::encoding::Encoding;
 use crate::erring::HTTPError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypedObject<T> {
+pub enum PackObject<T> {
     Json(T),
     Cbor(T),
 }
 
-impl<S> TypedObject<S> {
+impl<S> PackObject<S> {
     pub fn unwrap(self) -> S {
         match self {
-            TypedObject::Json(v) => v,
-            TypedObject::Cbor(v) => v,
+            PackObject::Json(v) => v,
+            PackObject::Cbor(v) => v,
         }
     }
 
-    pub fn unwrap_type(self) -> (TypedObject<()>, S) {
+    pub fn unpack(self) -> (PackObject<()>, S) {
         match self {
-            TypedObject::Json(v) => (TypedObject::Json(()), v),
-            TypedObject::Cbor(v) => (TypedObject::Cbor(()), v),
+            PackObject::Json(v) => (PackObject::Json(()), v),
+            PackObject::Cbor(v) => (PackObject::Cbor(()), v),
         }
     }
 
-    pub fn unit(&self) -> TypedObject<()> {
+    pub fn unit(&self) -> PackObject<()> {
         match self {
-            TypedObject::Json(_) => TypedObject::Json(()),
-            TypedObject::Cbor(_) => TypedObject::Cbor(()),
+            PackObject::Json(_) => PackObject::Json(()),
+            PackObject::Cbor(_) => PackObject::Cbor(()),
         }
     }
 
-    pub fn with<T>(&self, v: T) -> TypedObject<T> {
+    pub fn with<T>(&self, v: T) -> PackObject<T> {
         match self {
-            TypedObject::Json(_) => TypedObject::Json(v),
-            TypedObject::Cbor(_) => TypedObject::Cbor(v),
+            PackObject::Json(_) => PackObject::Json(v),
+            PackObject::Cbor(_) => PackObject::Cbor(v),
         }
     }
 
-    pub fn with_vec<T>(&self, vv: Vec<T>) -> Vec<TypedObject<T>> {
+    pub fn with_vec<T>(&self, vv: Vec<T>) -> Vec<PackObject<T>> {
         match self {
-            TypedObject::Json(_) => vv.into_iter().map(TypedObject::Json).collect(),
-            TypedObject::Cbor(_) => vv.into_iter().map(TypedObject::Cbor).collect(),
+            PackObject::Json(_) => vv.into_iter().map(PackObject::Json).collect(),
+            PackObject::Cbor(_) => vv.into_iter().map(PackObject::Cbor).collect(),
         }
     }
 
-    pub fn with_set<T>(&self, vv: HashSet<T>) -> Vec<TypedObject<T>> {
+    pub fn with_set<T>(&self, vv: HashSet<T>) -> Vec<PackObject<T>> {
         match self {
-            TypedObject::Json(_) => vv.into_iter().map(TypedObject::Json).collect(),
-            TypedObject::Cbor(_) => vv.into_iter().map(TypedObject::Cbor).collect(),
+            PackObject::Json(_) => vv.into_iter().map(PackObject::Json).collect(),
+            PackObject::Cbor(_) => vv.into_iter().map(PackObject::Cbor).collect(),
         }
     }
 }
 
-impl<T: Default> Default for TypedObject<T> {
+impl<T: Default> Default for PackObject<T> {
     fn default() -> Self {
-        TypedObject::Json(T::default())
+        PackObject::Json(T::default())
     }
 }
 
-impl<T> Deref for TypedObject<T> {
-    type Target = T;
+impl<T> AsRef<T> for PackObject<T> {
+    #[inline]
+    fn as_ref(&self) -> &T {
+        match self {
+            PackObject::Json(ref v) => v,
+            PackObject::Cbor(ref v) => v,
+        }
+    }
+}
 
+impl<T> Deref for PackObject<T> {
+    type Target = T;
+    #[inline]
     fn deref(&self) -> &Self::Target {
         match self {
-            TypedObject::Json(ref v) => v,
-            TypedObject::Cbor(ref v) => v,
+            PackObject::Json(ref v) => v,
+            PackObject::Cbor(ref v) => v,
         }
     }
 }
 
-impl Serialize for TypedObject<()> {
+impl Serialize for PackObject<()> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_none()
+        serializer.serialize_unit()
     }
 }
 
-impl Serialize for TypedObject<&[u8]> {
+impl Serialize for PackObject<&[u8]> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            TypedObject::Json(v) => {
+            PackObject::Json(v) => {
                 serializer.serialize_str(general_purpose::URL_SAFE_NO_PAD.encode(v).as_str())
             }
-            TypedObject::Cbor(v) => serializer.serialize_bytes(v),
+            PackObject::Cbor(v) => serializer.serialize_bytes(v),
         }
     }
 }
 
-impl Serialize for TypedObject<Vec<u8>> {
+impl Serialize for PackObject<Vec<u8>> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            TypedObject::Json(v) => {
+            PackObject::Json(v) => {
                 serializer.serialize_str(general_purpose::URL_SAFE_NO_PAD.encode(v).as_str())
             }
-            TypedObject::Cbor(v) => serializer.serialize_bytes(v),
+            PackObject::Cbor(v) => serializer.serialize_bytes(v),
         }
     }
 }
 
-impl Serialize for TypedObject<xid::Id> {
+impl Serialize for PackObject<xid::Id> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            TypedObject::Json(v) => serializer.serialize_str(v.to_string().as_str()),
-            TypedObject::Cbor(v) => serializer.serialize_bytes(v.as_bytes()),
+            PackObject::Json(v) => serializer.serialize_str(v.to_string().as_str()),
+            PackObject::Cbor(v) => serializer.serialize_bytes(v.as_bytes()),
         }
     }
 }
 
-impl Serialize for TypedObject<isolang::Language> {
+impl Serialize for PackObject<isolang::Language> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            TypedObject::Json(v) => serializer.serialize_str(v.to_name()),
-            TypedObject::Cbor(v) => serializer.serialize_str(v.to_639_3()),
+            PackObject::Json(v) => serializer.serialize_str(v.to_name()),
+            PackObject::Cbor(v) => serializer.serialize_str(v.to_639_3()),
         }
     }
 }
 
-struct TypedObjectBytesVisitor;
+struct PackObjectBytesVisitor;
 
-impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
-    type Value = TypedObject<Vec<u8>>;
+impl<'de> de::Visitor<'de> for PackObjectBytesVisitor {
+    type Value = PackObject<Vec<u8>>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a byte array or a no pad base64url string")
@@ -163,21 +173,21 @@ impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
     where
         E: de::Error,
     {
-        Ok(TypedObject::Cbor(v.to_vec()))
+        Ok(PackObject::Cbor(v.to_vec()))
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        Ok(TypedObject::Cbor(v.to_vec()))
+        Ok(PackObject::Cbor(v.to_vec()))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where
         E: de::Error,
     {
-        Ok(TypedObject::Cbor(v))
+        Ok(PackObject::Cbor(v))
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -187,7 +197,7 @@ impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
         let v = general_purpose::URL_SAFE_NO_PAD
             .decode(v)
             .map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(v))
+        Ok(PackObject::Json(v))
     }
 
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
@@ -197,7 +207,7 @@ impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
         let v = general_purpose::URL_SAFE_NO_PAD
             .decode(v)
             .map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(v))
+        Ok(PackObject::Json(v))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
@@ -207,23 +217,23 @@ impl<'de> de::Visitor<'de> for TypedObjectBytesVisitor {
         let v = general_purpose::URL_SAFE_NO_PAD
             .decode(v)
             .map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(v))
+        Ok(PackObject::Json(v))
     }
 }
 
-impl<'de> Deserialize<'de> for TypedObject<Vec<u8>> {
-    fn deserialize<D>(deserializer: D) -> Result<TypedObject<Vec<u8>>, D::Error>
+impl<'de> Deserialize<'de> for PackObject<Vec<u8>> {
+    fn deserialize<D>(deserializer: D) -> Result<PackObject<Vec<u8>>, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        deserializer.deserialize_any(TypedObjectBytesVisitor)
+        deserializer.deserialize_any(PackObjectBytesVisitor)
     }
 }
 
-struct TypedObjectLanguageVisitor;
+struct PackObjectLanguageVisitor;
 
-impl<'de> de::Visitor<'de> for TypedObjectLanguageVisitor {
-    type Value = TypedObject<isolang::Language>;
+impl<'de> de::Visitor<'de> for PackObjectLanguageVisitor {
+    type Value = PackObject<isolang::Language>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a ISO 639-1, ISO 639-3 or English language name string")
@@ -235,8 +245,8 @@ impl<'de> de::Visitor<'de> for TypedObjectLanguageVisitor {
     {
         let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
         match v.len() {
-            3 => Ok(TypedObject::Cbor(id)),
-            _ => Ok(TypedObject::Json(id)),
+            3 => Ok(PackObject::Cbor(id)),
+            _ => Ok(PackObject::Json(id)),
         }
     }
 
@@ -246,8 +256,8 @@ impl<'de> de::Visitor<'de> for TypedObjectLanguageVisitor {
     {
         let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
         match v.len() {
-            3 => Ok(TypedObject::Cbor(id)),
-            _ => Ok(TypedObject::Json(id)),
+            3 => Ok(PackObject::Cbor(id)),
+            _ => Ok(PackObject::Json(id)),
         }
     }
 
@@ -257,25 +267,25 @@ impl<'de> de::Visitor<'de> for TypedObjectLanguageVisitor {
     {
         let id = isolang::Language::from_str(&v).map_err(de::Error::custom)?;
         match v.len() {
-            3 => Ok(TypedObject::Cbor(id)),
-            _ => Ok(TypedObject::Json(id)),
+            3 => Ok(PackObject::Cbor(id)),
+            _ => Ok(PackObject::Json(id)),
         }
     }
 }
 
-impl<'de> Deserialize<'de> for TypedObject<isolang::Language> {
-    fn deserialize<D>(deserializer: D) -> Result<TypedObject<isolang::Language>, D::Error>
+impl<'de> Deserialize<'de> for PackObject<isolang::Language> {
+    fn deserialize<D>(deserializer: D) -> Result<PackObject<isolang::Language>, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        deserializer.deserialize_str(TypedObjectLanguageVisitor)
+        deserializer.deserialize_str(PackObjectLanguageVisitor)
     }
 }
 
-struct TypedObjectXidVisitor;
+struct PackObjectXidVisitor;
 
-impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
-    type Value = TypedObject<xid::Id>;
+impl<'de> de::Visitor<'de> for PackObjectXidVisitor {
+    type Value = PackObject<xid::Id>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a 12 bytes array or a 20 length xid string")
@@ -293,7 +303,7 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         } else {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(v);
-            Ok(TypedObject::Cbor(xid::Id(bytes)))
+            Ok(PackObject::Cbor(xid::Id(bytes)))
         }
     }
 
@@ -309,7 +319,7 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         } else {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(v);
-            Ok(TypedObject::Cbor(xid::Id(bytes)))
+            Ok(PackObject::Cbor(xid::Id(bytes)))
         }
     }
 
@@ -325,7 +335,7 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         } else {
             let mut bytes = [0u8; 12];
             bytes.copy_from_slice(&v);
-            Ok(TypedObject::Cbor(xid::Id(bytes)))
+            Ok(PackObject::Cbor(xid::Id(bytes)))
         }
     }
 
@@ -334,7 +344,7 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         E: de::Error,
     {
         let id = xid::Id::from_str(v).map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(id))
+        Ok(PackObject::Json(id))
     }
 
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
@@ -342,7 +352,7 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         E: de::Error,
     {
         let id = xid::Id::from_str(v).map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(id))
+        Ok(PackObject::Json(id))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
@@ -350,21 +360,21 @@ impl<'de> de::Visitor<'de> for TypedObjectXidVisitor {
         E: de::Error,
     {
         let id = xid::Id::from_str(&v).map_err(de::Error::custom)?;
-        Ok(TypedObject::Json(id))
+        Ok(PackObject::Json(id))
     }
 }
 
-impl<'de> Deserialize<'de> for TypedObject<xid::Id> {
-    fn deserialize<D>(deserializer: D) -> Result<TypedObject<xid::Id>, D::Error>
+impl<'de> Deserialize<'de> for PackObject<xid::Id> {
+    fn deserialize<D>(deserializer: D) -> Result<PackObject<xid::Id>, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        deserializer.deserialize_any(TypedObjectXidVisitor)
+        deserializer.deserialize_any(PackObjectXidVisitor)
     }
 }
 
 #[async_trait]
-impl<S> FromRequestParts<S> for TypedObject<()>
+impl<S> FromRequestParts<S> for PackObject<()>
 where
     S: Send + Sync,
 {
@@ -377,10 +387,10 @@ where
                 if let Some(accept) = parts.headers.get(header::ACCEPT) {
                     if let Ok(accept) = accept.to_str() {
                         if accept.contains("application/cbor") {
-                            return Ok(TypedObject::Cbor(()));
+                            return Ok(PackObject::Cbor(()));
                         }
                         if accept.contains("application/json") {
-                            return Ok(TypedObject::Json(()));
+                            return Ok(PackObject::Json(()));
                         }
                         ct = accept.to_string();
                     }
@@ -396,7 +406,7 @@ where
 }
 
 #[async_trait]
-impl<T, S, B> FromRequest<S, B> for TypedObject<T>
+impl<T, S, B> FromRequest<S, B> for PackObject<T>
 where
     T: DeserializeOwned + Send + Sync,
     B: HttpBody + Send + 'static,
@@ -436,27 +446,27 @@ where
         }
 
         match ct {
-            TypedObject::Json(_) => {
+            PackObject::Json(_) => {
                 let value: T = serde_json::from_slice(&bytes).map_err(|err| HTTPError {
                     code: StatusCode::BAD_REQUEST.as_u16(),
                     message: format!("Invalid JSON body, {}", err),
                     data: None,
                 })?;
-                Ok(TypedObject::Json(value))
+                Ok(PackObject::Json(value))
             }
-            TypedObject::Cbor(_) => {
+            PackObject::Cbor(_) => {
                 let value: T = ciborium::from_reader(&bytes[..]).map_err(|err| HTTPError {
                     code: StatusCode::BAD_REQUEST.as_u16(),
                     message: format!("Invalid CBOR body, {}", err),
                     data: None,
                 })?;
-                Ok(TypedObject::Cbor(value))
+                Ok(PackObject::Cbor(value))
             }
         }
     }
 }
 
-fn get_content_type(headers: &HeaderMap) -> Result<TypedObject<()>, String> {
+fn get_content_type(headers: &HeaderMap) -> Result<PackObject<()>, String> {
     let content_type = if let Some(content_type) = headers.get(header::CONTENT_TYPE) {
         content_type
     } else {
@@ -472,10 +482,10 @@ fn get_content_type(headers: &HeaderMap) -> Result<TypedObject<()>, String> {
     if let Ok(mime) = content_type.parse::<mime::Mime>() {
         if mime.type_() == "application" {
             if mime.subtype() == "cbor" || mime.suffix().map_or(false, |name| name == "cbor") {
-                return Ok(TypedObject::Cbor(()));
+                return Ok(PackObject::Cbor(()));
             } else if mime.subtype() == "json" || mime.suffix().map_or(false, |name| name == "json")
             {
-                return Ok(TypedObject::Json(()));
+                return Ok(PackObject::Json(()));
             }
         }
     }
@@ -483,7 +493,7 @@ fn get_content_type(headers: &HeaderMap) -> Result<TypedObject<()>, String> {
     Err(content_type.to_string())
 }
 
-impl<T> IntoResponse for TypedObject<T>
+impl<T> IntoResponse for PackObject<T>
 where
     T: Serialize,
 {
@@ -492,7 +502,7 @@ where
         // https://docs.rs/serde_json/1.0.82/src/serde_json/ser.rs.html#2189
         let mut buf = BytesMut::with_capacity(128).writer();
         let res: Result<Response, Box<dyn Error>> = match self {
-            TypedObject::Json(v) => match serde_json::to_writer(&mut buf, &v) {
+            PackObject::Json(v) => match serde_json::to_writer(&mut buf, &v) {
                 Ok(()) => Ok((
                     [(
                         header::CONTENT_TYPE,
@@ -503,7 +513,7 @@ where
                     .into_response()),
                 Err(err) => Err(Box::new(err)),
             },
-            TypedObject::Cbor(v) => match ciborium::into_writer(&v, &mut buf) {
+            PackObject::Cbor(v) => match ciborium::into_writer(&v, &mut buf) {
                 Ok(()) => Ok((
                     [(
                         header::CONTENT_TYPE,

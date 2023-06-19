@@ -4,36 +4,33 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{convert::From, str::FromStr, sync::Arc};
+use std::sync::Arc;
 use validator::Validate;
 
 use crate::db;
 use axum_web::context::ReqContext;
 use axum_web::erring::{HTTPError, SuccessResponse};
-use axum_web::object::TypedObject;
+use axum_web::object::PackObject;
 
-use super::{validate_xid, AppState, QueryIdLanguageVersion, UpdatePublicationStatusInput};
+use super::{AppState, QueryIdLanguageVersion, UpdatePublicationStatusInput};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreatePublicationInput {
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub gid: String,
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub id: String,
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub cid: String,
+    pub gid: PackObject<xid::Id>,
+    pub id: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PublicationOutput {
-    pub id: TypedObject<xid::Id>,
-    pub language: TypedObject<Language>,
+    pub id: PackObject<xid::Id>,
+    pub language: PackObject<Language>,
     pub version: i16,
     pub rating: i8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<TypedObject<xid::Id>>,
+    pub creator: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,15 +54,15 @@ pub struct PublicationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<TypedObject<Vec<u8>>>,
+    pub content: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_languages: Option<Vec<TypedObject<Language>>>,
+    pub active_languages: Option<Vec<PackObject<Language>>>,
 }
 
 impl PublicationOutput {
-    fn from<T>(val: db::Publication, to: &TypedObject<T>) -> Self {
+    fn from<T>(val: db::Publication, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             id: to.with(val.id),
             language: to.with(val.language),
@@ -106,38 +103,38 @@ impl PublicationOutput {
 pub async fn create(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<CreatePublicationInput>,
-) -> Result<TypedObject<SuccessResponse<PublicationOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<CreatePublicationInput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
     ctx.set_kvs(vec![
         ("action", "create_publication".into()),
-        ("gid", input.gid.clone().into()),
-        ("id", input.id.clone().into()),
-        ("cid", input.cid.clone().into()),
+        ("gid", input.gid.to_string().into()),
+        ("id", input.id.to_string().into()),
+        ("cid", input.cid.to_string().into()),
     ])
     .await;
 
-    let cid = xid::Id::from_str(&input.cid).unwrap();
+    let cid = *input.cid.to_owned();
     let mut index = db::CreationIndex::with_pk(cid);
 
     if index.get_one(&app.scylla).await.is_err() {
         return Err(HTTPError::new(
             404,
-            format!("Creation not exists, cid({})", input.cid),
+            format!("Creation not exists, cid({})", input.cid.as_ref()),
         ));
     }
     if index.rating == i8::MAX {
         return Err(HTTPError::new(
             451,
-            format!("Creation is banned, cid({})", input.cid),
+            format!("Creation is banned, cid({})", input.cid.as_ref()),
         ));
     }
 
     let mut draft = db::PublicationDraft {
-        gid: xid::Id::from_str(&input.gid).unwrap(),
-        id: xid::Id::from_str(&input.id).unwrap(),
+        gid: *input.gid.to_owned(),
+        id: *input.id.to_owned(),
         cid,
         ..Default::default()
     };
@@ -155,7 +152,7 @@ pub async fn create(
             400,
             format!(
                 "Publication draft status not match, gid({}), id({}), cid({}), expected 1, got {}",
-                input.gid, input.id, input.cid, draft.status
+                *input.gid, *input.id, *input.cid, draft.status
             ),
         ));
     }
@@ -173,18 +170,18 @@ pub async fn create(
 pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdLanguageVersion>,
-) -> Result<TypedObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let language = Language::from_str(&input.language).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let language = *input.language.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_publication".into()),
-        ("id", input.id.clone().into()),
-        ("language", input.language.clone().into()),
+        ("id", input.id.to_string().into()),
+        ("language", input.language.to_name().into()),
         ("version", input.version.into()),
     ])
     .await;
@@ -194,7 +191,7 @@ pub async fn get(
     if index.get_one(&app.scylla).await.is_err() {
         return Err(HTTPError::new(
             404,
-            format!("Creation not exists, cid({})", input.id),
+            format!("Creation not exists, cid({})", *input.id),
         ));
     }
     if index.rating > ctx.rating {
@@ -235,16 +232,16 @@ pub async fn get(
 pub async fn update_status(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<UpdatePublicationStatusInput>,
-) -> Result<TypedObject<SuccessResponse<PublicationOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<UpdatePublicationStatusInput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let language = Language::from_str(&input.language).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let language = *input.language.to_owned();
     ctx.set_kvs(vec![
         ("action", "update_publication_status".into()),
-        ("id", input.id.clone().into()),
+        ("id", input.id.to_string().into()),
         ("language", language.to_name().into()),
         ("version", input.version.into()),
     ])
@@ -269,18 +266,18 @@ pub async fn update_status(
 pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdLanguageVersion>,
-) -> Result<TypedObject<SuccessResponse<bool>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let language = Language::from_str(&input.language).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let language = *input.language.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_publication".into()),
-        ("id", input.id.clone().into()),
-        ("language", input.language.clone().into()),
+        ("id", input.id.to_string().into()),
+        ("language", input.language.to_name().into()),
         ("version", input.version.into()),
     ])
     .await;

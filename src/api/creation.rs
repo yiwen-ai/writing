@@ -4,27 +4,22 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{convert::From, str::FromStr, sync::Arc};
+use std::{convert::From, sync::Arc};
 use validator::Validate;
 
 use crate::db;
 
 use axum_web::context::ReqContext;
 use axum_web::erring::{HTTPError, SuccessResponse};
-use axum_web::object::TypedObject;
+use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{
-    validate_cbor, validate_xid, AppState, Pagination, QueryIdGid, QueryIdGidVersion,
-    UpdateStatusInput,
-};
+use super::{AppState, Pagination, QueryIdGid, QueryIdGidVersion, UpdateStatusInput};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateCreationInput {
-    // #[validate(length(equal = 20), custom = "validate_xid")]
-    pub gid: TypedObject<xid::Id>,
-    // #[validate(length(min = 2), custom = "validate_language")]
-    pub language: TypedObject<Language>,
+    pub gid: PackObject<xid::Id>,
+    pub language: PackObject<Language>,
     #[validate(url)]
     pub original_url: Option<String>,
     pub genre: Option<Vec<String>>,
@@ -39,17 +34,15 @@ pub struct CreateCreationInput {
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
-    // #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
-    // #[serde(with = "serde_bytes")]
-    pub content: TypedObject<Vec<u8>>,
+    pub content: PackObject<Vec<u8>>,
     #[validate(url)]
     pub license: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CreationOutput {
-    pub id: TypedObject<xid::Id>,
-    pub gid: TypedObject<xid::Id>,
+    pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,15 +50,15 @@ pub struct CreationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<TypedObject<Language>>,
+    pub language: Option<PackObject<Language>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub creator: Option<TypedObject<xid::Id>>,
+    pub creator: Option<PackObject<xid::Id>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_languages: Option<Vec<TypedObject<Language>>>,
+    pub active_languages: Option<Vec<PackObject<Language>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,17 +76,17 @@ pub struct CreationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reviewers: Option<Vec<TypedObject<xid::Id>>>,
+    pub reviewers: Option<Vec<PackObject<xid::Id>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<TypedObject<Vec<u8>>>,
+    pub content: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 }
 
 impl CreationOutput {
-    fn from<T>(val: db::Creation, to: &TypedObject<T>) -> Self {
+    fn from<T>(val: db::Creation, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             gid: to.with(val.gid),
             id: to.with(val.id),
@@ -135,9 +128,9 @@ impl CreationOutput {
 pub async fn create(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<CreateCreationInput>,
-) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<CreateCreationInput>,
+) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
     let mut doc = db::Creation {
@@ -172,18 +165,18 @@ pub async fn create(
 pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdGid>,
-) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap();
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_creation".into()),
-        ("gid", input.gid.clone().into()),
-        ("id", input.id.clone().into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 
@@ -202,13 +195,13 @@ pub async fn get(
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<Pagination>,
-) -> Result<TypedObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
     let page_size = input.page_size.unwrap_or(10);
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let gid = *input.gid.to_owned();
     ctx.set_kvs(vec![
         ("action", "list_creation".into()),
         ("gid", gid.to_string().into()),
@@ -216,7 +209,7 @@ pub async fn list(
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| xid::Id::from_str(&s).unwrap());
+    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::Creation::find(
         &app.scylla,
         gid,
@@ -244,10 +237,8 @@ pub async fn list(
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateCreationInput {
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub id: String,
-    #[validate(length(equal = 20), custom = "validate_xid")]
-    pub gid: String,
+    pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
     #[validate(length(min = 3, max = 512))]
     pub title: Option<String>,
@@ -263,8 +254,7 @@ pub struct UpdateCreationInput {
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
-    #[validate(length(min = 16, max = 1048576), custom = "validate_cbor")] // 1MB
-    pub content: Option<Vec<u8>>,
+    pub content: Option<PackObject<Vec<u8>>>,
     #[validate(url)]
     pub license: Option<String>,
 }
@@ -294,7 +284,7 @@ impl UpdateCreationInput {
             cols.set_as("summary", &summary)?;
         }
         if let Some(content) = self.content {
-            cols.set_as("content", &content)?;
+            cols.set_as("content", &content.unwrap())?;
         }
         if let Some(license) = self.license {
             cols.set_as("license", &license)?;
@@ -314,13 +304,13 @@ impl UpdateCreationInput {
 pub async fn update(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<UpdateCreationInput>,
-) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<UpdateCreationInput>,
+) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let mut doc = db::Creation::with_pk(gid, id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
@@ -348,13 +338,13 @@ pub async fn update(
 pub async fn update_status(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<UpdateStatusInput>,
-) -> Result<TypedObject<SuccessResponse<CreationOutput>>, HTTPError> {
-    let (to, input) = to.unwrap_type();
+    to: PackObject<UpdateStatusInput>,
+) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let mut doc = db::Creation::with_pk(gid, id);
     ctx.set_kvs(vec![
         ("action", "update_status".into()),
@@ -377,18 +367,18 @@ pub async fn update_status(
 pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: TypedObject<()>,
+    to: PackObject<()>,
     input: Query<QueryIdGidVersion>,
-) -> Result<TypedObject<SuccessResponse<bool>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
 
-    let id = xid::Id::from_str(&input.id).unwrap(); // validated
-    let gid = xid::Id::from_str(&input.gid).unwrap(); // validated
+    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_creation".into()),
-        ("gid", input.gid.clone().into()),
-        ("id", input.id.clone().into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 
