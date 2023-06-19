@@ -18,9 +18,10 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub static USER_JARVIS: &str = "0000000000000jarvis0"; // system user
 pub static USER_ANON: &str = "000000000000000anon0"; // anonymous user
 
+#[derive(Clone)]
 pub struct AppState {
     pub start_at: u64,
-    pub scylla: db::scylladb::ScyllaDB,
+    pub scylla: Arc<db::scylladb::ScyllaDB>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -32,7 +32,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
 
     let app_state = Arc::new(api::AppState {
         start_at: context::unix_ms(),
-        scylla,
+        scylla: Arc::new(scylla),
     });
 
     let mds = ServiceBuilder::new()
@@ -174,6 +174,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        healthz_api_works().await?;
+        api_works_with_json_and_cbor().await?;
+
+        Ok(())
+    }
+
     async fn healthz_api_works() -> anyhow::Result<()> {
         let (addr, client) = SERVER.get_or_init(get_server).await;
 
@@ -214,8 +222,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore]
     async fn api_works_with_json_and_cbor() -> anyhow::Result<()> {
         let (addr, client) = SERVER.get_or_init(get_server).await;
 

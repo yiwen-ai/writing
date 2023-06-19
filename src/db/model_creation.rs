@@ -506,7 +506,7 @@ impl Creation {
 #[cfg(test)]
 mod tests {
     use ciborium::cbor;
-    use std::{str::FromStr};
+    use std::str::FromStr;
     use tokio::sync::OnceCell;
 
     use crate::conf;
@@ -527,6 +527,14 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        creation_index_model_works().await?;
+        creation_model_works().await?;
+
+        Ok(())
+    }
+
     async fn creation_index_model_works() -> anyhow::Result<()> {
         let db = get_db().await;
 
@@ -566,8 +574,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore]
     async fn creation_model_works() -> anyhow::Result<()> {
         assert!(Creation::fields().contains(&"license".to_string()));
         assert!(!Creation::fields().contains(&"_fields".to_string()));
