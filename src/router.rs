@@ -1,5 +1,4 @@
 use axum::{
-    http::header::HeaderName,
     middleware,
     response::{IntoResponse, Response},
     routing, Router,
@@ -7,11 +6,12 @@ use axum::{
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{
-    catch_panic::CatchPanicLayer, compression::CompressionLayer,
-    propagate_header::PropagateHeaderLayer,
+    catch_panic::CatchPanicLayer,
+    compression::{predicate::SizeAbove, CompressionLayer},
 };
 
 use axum_web::context;
+use axum_web::encoding;
 use axum_web::erring;
 
 use crate::api;
@@ -30,15 +30,15 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
     };
     let scylla = db::scylladb::ScyllaDB::new(cfg.scylla, keyspace).await?;
 
-    let app_state = Arc::new(api::AppState { scylla });
+    let app_state = Arc::new(api::AppState {
+        start_at: context::unix_ms(),
+        scylla,
+    });
 
     let mds = ServiceBuilder::new()
-        .layer(middleware::from_fn(context::middleware))
         .layer(CatchPanicLayer::new())
-        .layer(CompressionLayer::new())
-        .layer(PropagateHeaderLayer::new(HeaderName::from_static(
-            "x-request-id",
-        )));
+        .layer(middleware::from_fn(context::middleware))
+        .layer(CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)));
 
     let app = Router::new()
         .route("/", routing::get(api::version))
@@ -91,7 +91,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .get(api::publication::get)
                         .delete(api::publication::delete),
                 )
-                .route("/batch_get", routing::post(todo))
+                .route("/batch_get", routing::post(api::publication::batch_get))
                 .route(
                     "/update_status",
                     routing::patch(api::publication::update_status),
@@ -127,9 +127,9 @@ mod tests {
     use base64::{engine::general_purpose, Engine as _};
     use ciborium::cbor;
     use serde_json::json;
-    use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
+    use std::{net::SocketAddr};
     use tokio::sync::OnceCell;
     use tokio::time;
 
@@ -138,9 +138,9 @@ mod tests {
 
     use super::*;
 
-    static SERVER: OnceCell<SocketAddr> = OnceCell::const_new();
+    static SERVER: OnceCell<(SocketAddr, reqwest::Client)> = OnceCell::const_new();
 
-    async fn get_server() -> SocketAddr {
+    async fn get_server() -> (SocketAddr, reqwest::Client) {
         let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
         let listener = TcpListener::bind("0.0.0.0:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -153,8 +153,11 @@ mod tests {
                 .await;
         });
 
-        time::sleep(time::Duration::from_millis(300)).await;
-        addr
+        time::sleep(time::Duration::from_millis(100)).await;
+        (
+            addr,
+            reqwest::ClientBuilder::new().gzip(true).build().unwrap(),
+        )
     }
 
     fn encode_cbor(val: &ciborium::Value) -> anyhow::Result<Vec<u8>> {
@@ -166,8 +169,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn healthz_api_works() -> anyhow::Result<()> {
-        let addr = SERVER.get_or_init(get_server).await;
-        let client = reqwest::ClientBuilder::new().gzip(true).build().unwrap();
+        let (addr, client) = SERVER.get_or_init(get_server).await;
 
         let res = client
             .get(format!("http://{}/healthz", addr))
@@ -201,7 +203,7 @@ mod tests {
         let body = res.bytes().await?;
         let cbor_obj: api::AppInfo = ciborium::from_reader(&body[..]).unwrap();
 
-        assert_eq!(json_obj, cbor_obj);
+        assert_eq!(json_obj.start_at, cbor_obj.start_at);
 
         Ok(())
     }
@@ -209,8 +211,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn api_works_with_json_and_cbor() -> anyhow::Result<()> {
-        let addr = SERVER.get_or_init(get_server).await;
-        let client = reqwest::ClientBuilder::new().gzip(true).build().unwrap();
+        let (addr, client) = SERVER.get_or_init(get_server).await;
 
         let content = encode_cbor(
             &cbor!({

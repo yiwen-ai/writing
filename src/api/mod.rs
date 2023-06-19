@@ -18,6 +18,7 @@ pub static USER_JARVIS: &str = "0000000000000jarvis0"; // system user
 pub static USER_ANON: &str = "000000000000000anon0"; // anonymous user
 
 pub struct AppState {
+    pub start_at: u64,
     pub scylla: db::scylladb::ScyllaDB,
 }
 
@@ -29,6 +30,7 @@ pub struct AppVersion {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AppInfo {
+    pub start_at: u64,
     // https://docs.rs/scylla/latest/scylla/struct.Metrics.html
     pub scylla_latency_avg_ms: u64,
     pub scylla_latency_p99_ms: u64,
@@ -50,6 +52,7 @@ pub async fn version(to: PackObject<()>, State(_): State<Arc<AppState>>) -> Pack
 pub async fn healthz(to: PackObject<()>, State(app): State<Arc<AppState>>) -> PackObject<AppInfo> {
     let m = app.scylla.metrics();
     to.with(AppInfo {
+        start_at: app.start_at,
         scylla_latency_avg_ms: m.get_latency_avg_ms().unwrap_or(0),
         scylla_latency_p99_ms: m.get_latency_percentile_ms(99.0f64).unwrap_or(0),
         scylla_latency_p90_ms: m.get_latency_percentile_ms(90.0f64).unwrap_or(0),

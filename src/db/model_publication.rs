@@ -84,7 +84,7 @@ impl PublicationDraft {
         select_fields: Vec<String>,
     ) -> anyhow::Result<()> {
         let fields = Self::select_fields(select_fields, false)?;
-        self._fields = fields.iter().map(|f| f.to_string()).collect();
+        self._fields = fields.clone();
 
         let query = format!(
             "SELECT {} FROM publication_draft WHERE gid=? AND id=? LIMIT 1",
@@ -106,7 +106,7 @@ impl PublicationDraft {
         self.updated_at = now;
 
         let fields = Self::fields();
-        self._fields = fields.iter().map(|f| f.to_string()).collect();
+        self._fields = fields.clone();
 
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
@@ -383,7 +383,7 @@ impl PublicationDraft {
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, fields.clone())?;
             doc.fill(&cols);
-            doc._fields = fields.iter().map(|f| f.to_string()).collect();
+            doc._fields = fields.clone();
             res.push(doc);
         }
 
@@ -494,7 +494,7 @@ impl Publication {
         select_fields: Vec<String>,
     ) -> anyhow::Result<()> {
         let fields = Self::select_fields(select_fields, false)?;
-        self._fields = fields.iter().map(|f| f.to_string()).collect();
+        self._fields = fields.clone();
         let res = if self.version > 0 {
             let query = format!(
                 "SELECT {} FROM publication WHERE id=? AND language=? AND version=? LIMIT 1",
@@ -655,7 +655,7 @@ impl Publication {
         publication.updated_at = now;
 
         let fields = Self::fields();
-        publication._fields = fields.iter().map(|f| f.to_string()).collect();
+        publication._fields = fields.clone();
 
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
@@ -694,16 +694,5 @@ impl Publication {
         let _ = db.execute(query, params).await?;
 
         Ok(publication)
-    }
-
-    pub async fn batch_get(
-        _db: &scylladb::ScyllaDB,
-        _ids: Vec<xid::Id>,
-        _select_fields: Vec<String>,
-        _max_rating: i8,
-    ) -> anyhow::Result<Vec<Publication>> {
-        // let fields = Self::select_fields(select_fields, true)?;
-
-        Ok(Vec::new())
     }
 }

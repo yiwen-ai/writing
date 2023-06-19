@@ -3,7 +3,7 @@ use libflate::gzip::{Decoder, Encoder};
 use std::{io, string::ToString};
 
 // recommended minimum size for compression.
-pub const MIN_ENCODING_SIZE: usize = 128;
+pub const MIN_ENCODING_SIZE: u16 = 128;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Encoding {

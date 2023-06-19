@@ -7,6 +7,9 @@ run-dev:
 	@CONFIG_FILE_PATH=./config.toml cargo run
 
 test:
+	@cargo test --workspace -- --nocapture
+
+test-all:
 	@cargo test --workspace -- --nocapture --include-ignored
 
 lint:

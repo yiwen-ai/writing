@@ -6,7 +6,7 @@ use std::{
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
-use scylla_orm::ColumnsMap;
+use scylla_orm::{ColumnsMap, CqlValueSerder};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
@@ -31,7 +31,7 @@ impl CreationIndex {
     }
 
     pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
-        self._fields = Self::fields().iter().map(|f| f.to_string()).collect();
+        self._fields = Self::fields();
 
         let query = "SELECT gid,rating FROM creation_index WHERE id=? LIMIT 1";
         let params = (self.id.as_bytes(),);
@@ -54,11 +54,43 @@ impl CreationIndex {
             )));
         }
 
-        self._fields = Self::fields().iter().map(|f| f.to_string()).collect();
+        self._fields = Self::fields();
         let query = "INSERT INTO creation_index (id,gid,rating) VALUES (?,?,?) IF NOT EXISTS";
-        let params = (self.id.as_bytes(), self.gid.as_bytes(), 0i8);
+        let params = (self.id.as_bytes(), self.gid.as_bytes(), self.rating);
         let res = db.execute(query, params).await?;
         Ok(extract_applied(res))
+    }
+
+    pub async fn batch_get(
+        db: &scylladb::ScyllaDB,
+        ids: Vec<xid::Id>,
+        max_rating: i8,
+    ) -> anyhow::Result<Vec<CreationIndex>> {
+        let fields: Vec<String> = Self::fields();
+
+        let mut vals_name: Vec<&str> = Vec::with_capacity(ids.len());
+        let mut params: Vec<CqlValue> = Vec::with_capacity(ids.len() + 1);
+
+        for id in &ids {
+            vals_name.push("?");
+            params.push(id.to_cql().unwrap());
+        }
+
+        let query = format!("SELECT id,gid,rating FROM creation_index WHERE id IN ({}) AND rating<=? ALLOW FILTERING", vals_name.join(","));
+        params.push(max_rating.to_cql().unwrap());
+        let res = db.execute(query, params).await?;
+
+        let rows = res.rows.unwrap_or_default();
+        let mut res: Vec<CreationIndex> = Vec::with_capacity(rows.len());
+        for r in rows {
+            let mut cols = ColumnsMap::with_capacity(3);
+            cols.fill(r, fields.clone())?;
+            let mut item = CreationIndex::default();
+            item.fill(&cols);
+            res.push(item);
+        }
+
+        Ok(res)
     }
 }
 
@@ -135,7 +167,7 @@ impl Creation {
         select_fields: Vec<String>,
     ) -> anyhow::Result<()> {
         let fields = Self::select_fields(select_fields, false)?;
-        self._fields = fields.iter().map(|f| f.to_string()).collect();
+        self._fields = fields.clone();
 
         let query = format!(
             "SELECT {} FROM creation WHERE gid=? AND id=? LIMIT 1",
@@ -171,7 +203,7 @@ impl Creation {
         self.version = 1;
 
         let fields = Self::fields();
-        self._fields = fields.iter().map(|f| f.to_string()).collect();
+        self._fields = fields.clone();
 
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
@@ -463,7 +495,7 @@ impl Creation {
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, fields.clone())?;
             doc.fill(&cols);
-            doc._fields = fields.iter().map(|f| f.to_string()).collect();
+            doc._fields = fields.clone();
             res.push(doc);
         }
 
@@ -474,7 +506,7 @@ impl Creation {
 #[cfg(test)]
 mod tests {
     use ciborium::cbor;
-    use std::str::FromStr;
+    use std::{str::FromStr};
     use tokio::sync::OnceCell;
 
     use crate::conf;
@@ -484,10 +516,54 @@ mod tests {
 
     static DB: OnceCell<scylladb::ScyllaDB> = OnceCell::const_new();
 
-    async fn get_db() -> scylladb::ScyllaDB {
-        let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-        let res = scylladb::ScyllaDB::new(cfg.scylla, "writing_test").await;
-        res.unwrap()
+    async fn get_db() -> &'static scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = scylladb::ScyllaDB::new(cfg.scylla, "writing_test").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn creation_index_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+
+        let mut c1 = CreationIndex {
+            id: xid::new(),
+            gid: xid::new(),
+            ..Default::default()
+        };
+        c1.save(db).await?;
+
+        let mut c2 = CreationIndex {
+            id: xid::new(),
+            gid: xid::new(),
+            rating: 127,
+            ..Default::default()
+        };
+        c2.save(db).await?;
+
+        let mut c3 = CreationIndex {
+            id: xid::new(),
+            gid: xid::new(),
+            rating: 3,
+            ..Default::default()
+        };
+        c3.save(db).await?;
+
+        let mut d1 = CreationIndex::with_pk(c1.id);
+        d1.get_one(db).await?;
+        assert_eq!(d1.gid, c1.gid);
+
+        let docs = CreationIndex::batch_get(db, vec![c1.id, c3.id, c2.id], 3).await?;
+        assert!(docs.len() == 2);
+
+        let docs = CreationIndex::batch_get(db, vec![c1.id, c3.id, c2.id], 127).await?;
+        assert!(docs.len() == 3);
+
+        Ok(())
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -496,7 +572,7 @@ mod tests {
         assert!(Creation::fields().contains(&"license".to_string()));
         assert!(!Creation::fields().contains(&"_fields".to_string()));
 
-        let db = DB.get_or_init(get_db).await;
+        let db = get_db().await;
         let did = xid::new();
         let uid = xid::Id::from_str("jarvis00000000000000")?;
 

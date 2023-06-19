@@ -4,7 +4,7 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use validator::Validate;
 
 use crate::db;
@@ -285,4 +285,69 @@ pub async fn delete(
     let mut doc = db::Publication::with_pk(id, language, input.version);
     let res = doc.delete(&app.scylla).await?;
     Ok(to.with(SuccessResponse::new(res)))
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct BatchGetPublicationsInput {
+    #[validate(range(min = -1, max = 2))]
+    pub min_status: i8,
+    pub fields: Option<Vec<String>>,
+    #[validate(length(min = 1, max = 100))]
+    pub pks: Vec<(PackObject<xid::Id>, PackObject<Language>, i16)>,
+}
+
+pub async fn batch_get(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<BatchGetPublicationsInput>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+
+    ctx.set_kvs(vec![
+        ("action", "batch_get".into()),
+        ("min_status", input.min_status.into()),
+        ("length", input.pks.len().into()),
+    ])
+    .await;
+
+    let mut ids: Vec<xid::Id> = Vec::with_capacity(input.pks.len());
+    for (id, _, version) in &input.pks {
+        if *version < 0 {
+            return Err(HTTPError::new(400, format!("Invalid version {}", version)));
+        }
+
+        ids.push(*id.to_owned());
+    }
+
+    let indexs = db::CreationIndex::batch_get(&app.scylla, ids, ctx.rating).await?;
+    let ratings_map: HashMap<xid::Id, i8> = indexs.into_iter().map(|i| (i.id, i.rating)).collect();
+
+    let min_status = input.min_status;
+    let mut select_fields = db::Publication::select_fields(input.fields.unwrap_or_default(), true)?;
+    let status = "status".to_string();
+    if !select_fields.contains(&status) {
+        select_fields.push(status);
+    }
+
+    let mut res: Vec<db::Publication> = Vec::with_capacity(ratings_map.len());
+    for (id, language, version) in &input.pks {
+        let id = *id.to_owned();
+        if ratings_map.contains_key(&id) {
+            let mut item = db::Publication::with_pk(id, *language.to_owned(), *version);
+            if item
+                .get_one(&app.scylla, select_fields.clone())
+                .await
+                .is_ok() && item.status >= min_status {
+                item._rating = ratings_map.get(&id).unwrap().to_owned();
+                res.push(item);
+            }
+        }
+    }
+
+    Ok(to.with(SuccessResponse::new(
+        res.iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    )))
 }
