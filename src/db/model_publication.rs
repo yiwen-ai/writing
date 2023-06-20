@@ -11,7 +11,7 @@ use crate::db::{
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
 
-#[derive(Debug, Default, Clone, CqlOrm)]
+#[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct PublicationDraft {
     pub gid: xid::Id,
     pub id: xid::Id,
@@ -55,10 +55,7 @@ impl PublicationDraft {
         let fields = Self::fields();
         for field in &select_fields {
             if !fields.contains(field) {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Invalid field: {}", field),
-                )));
+                return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
 
@@ -78,6 +75,48 @@ impl PublicationDraft {
         Ok(select_fields)
     }
 
+    pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
+        if !(-1..=2).contains(&status) {
+            return Err(HTTPError::new(400, format!("Invalid status, {}", status)).into());
+        }
+
+        match self.status {
+            -1 if 0 != status => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication draft status is {}, expected update to 0, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            0 if !(-1..=1).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication draft status is {}, expected update to -1 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            1 if !(-1..=2).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication draft status is {}, expected update to -1, 0 or 2, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            2 if !(0..=2).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication draft status is {}, expected update to 0 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            _ => Ok(()),
+        }
+    }
+
     pub async fn get_one(
         &mut self,
         db: &scylladb::ScyllaDB,
@@ -88,6 +127,24 @@ impl PublicationDraft {
 
         let query = format!(
             "SELECT {} FROM publication_draft WHERE gid=? AND id=? LIMIT 1",
+            fields.join(",")
+        );
+        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let res = db.execute(query, params).await?.single_row()?;
+
+        let mut cols = ColumnsMap::with_capacity(fields.len());
+        cols.fill(res, fields)?;
+        self.fill(&cols);
+
+        Ok(())
+    }
+
+    pub async fn get_deleted(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
+        let fields = Self::fields();
+        self._fields = fields.clone();
+
+        let query = format!(
+            "SELECT {} FROM deleted_publication_draft WHERE gid=? AND id=? LIMIT 1",
             fields.join(",")
         );
         let params = (self.gid.as_bytes(), self.id.as_bytes());
@@ -126,7 +183,18 @@ impl PublicationDraft {
         );
 
         let res = db.execute(query, params).await?;
-        Ok(extract_applied(res))
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Publication draft {} save failed, please try again",
+                    self.id
+                ),
+            )
+            .into());
+        }
+
+        Ok(true)
     }
 
     pub async fn update_status(
@@ -138,56 +206,19 @@ impl PublicationDraft {
         self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Publication draft updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
-            )));
-        }
-        if self.status == status {
-            return Ok(true); // no need to update
+            )
+            .into());
         }
 
-        match self.status {
-            -1 if 0 != status => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication draft status is {}, expected update to 0, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            0 if !(-1..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication draft status is {}, expected update to -1 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            1 if !(-1..=2).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication draft status is {}, expected update to -1, 0 or 2, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            2 if !(0..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication draft status is {}, expected update to 0 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            _ => {} // continue
+        self.valid_status(status)?;
+        if self.status == status {
+            return Ok(false); // no need to update
         }
 
         let new_updated_at = unix_ms() as i64;
@@ -202,9 +233,20 @@ impl PublicationDraft {
         );
 
         let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Publication draft update_status {} failed, please try again",
+                    status
+                ),
+            )
+            .into());
+        }
+
         self.updated_at = new_updated_at;
         self.status = status;
-        Ok(extract_applied(res))
+        Ok(true)
     }
 
     pub async fn update(
@@ -214,7 +256,6 @@ impl PublicationDraft {
         updated_at: i64,
     ) -> anyhow::Result<bool> {
         let valid_fields = vec![
-            "language",
             "model",
             "title",
             "description",
@@ -228,32 +269,31 @@ impl PublicationDraft {
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Invalid field: {}", field),
-                )));
+                return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
 
         self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Publication draft updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
-            )));
+            )
+            .into());
         }
         if self.status < 0 || self.status > 1 {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Publication draft can not be update, status {}",
                     self.status
                 ),
-            )));
+            )
+            .into());
         }
 
         let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + 1);
@@ -276,8 +316,19 @@ impl PublicationDraft {
         params.push(CqlValue::BigInt(updated_at));
 
         let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Publication draft {} update failed, please try again",
+                    self.id
+                ),
+            )
+            .into());
+        }
+
         self.updated_at = new_updated_at;
-        Ok(extract_applied(res))
+        Ok(true)
     }
 
     pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
@@ -287,13 +338,14 @@ impl PublicationDraft {
         }
 
         if self.version != version {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Publication draft version conflict, expected version {}, got {}",
                     self.version, version
                 ),
-            )));
+            )
+            .into());
         }
 
         self.get_one(db, Vec::new()).await?;
@@ -391,7 +443,7 @@ impl PublicationDraft {
     }
 }
 
-#[derive(Debug, Default, Clone, CqlOrm)]
+#[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Publication {
     pub id: xid::Id,
     pub language: Language,
@@ -423,10 +475,7 @@ impl From<PublicationDraft> for Publication {
             id: draft.cid,
             language: draft.language,
             version: draft.version,
-            status: draft.status,
             creator: draft.creator,
-            created_at: draft.created_at,
-            updated_at: draft.updated_at,
             model: draft.model,
             original_url: draft.original_url,
             genre: draft.genre,
@@ -461,10 +510,7 @@ impl Publication {
         let fields = Self::fields();
         for field in &select_fields {
             if !fields.contains(field) {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Invalid field: {}", field),
-                )));
+                return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
 
@@ -486,6 +532,45 @@ impl Publication {
         }
 
         Ok(select_fields)
+    }
+
+    pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
+        if !(-1..=2).contains(&status) {
+            return Err(HTTPError::new(400, format!("Invalid status, {}", status)).into());
+        }
+
+        match self.status {
+            -1 if 0 != status => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication status is {}, expected update to 0, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            0 if !(-1..=1).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication status is {}, expected update to -1 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            1 if !(-1..=2).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Publication status is {}, expected update to -1, 0 or 2, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            2 => Err(HTTPError::new(
+                400,
+                format!("Publication status is {}, can not be updated", self.status),
+            )
+            .into()),
+            _ => Ok(()),
+        }
     }
 
     pub async fn get_one(
@@ -518,6 +603,33 @@ impl Publication {
         Ok(())
     }
 
+    pub async fn get_deleted(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
+        let fields = Self::fields();
+        self._fields = fields.clone();
+
+        let res = if self.version > 0 {
+            let query = format!(
+                "SELECT {} FROM deleted_publication WHERE id=? AND language=? AND version=? LIMIT 1",
+                fields.join(",")
+            );
+            let params = (self.id.as_bytes(), self.language.to_cql()?, self.version);
+            db.execute(query, params).await?.single_row()?
+        } else {
+            let query = format!(
+                "SELECT {} FROM deleted_publication WHERE id=? AND language=? LIMIT 1",
+                fields.join(",")
+            );
+            let params = (self.id.as_bytes(), self.language.to_cql()?);
+            db.execute(query, params).await?.single_row()?
+        };
+
+        let mut cols = ColumnsMap::with_capacity(fields.len());
+        cols.fill(res, fields)?;
+        self.fill(&cols);
+
+        Ok(())
+    }
+
     pub async fn update_status(
         &mut self,
         db: &scylladb::ScyllaDB,
@@ -527,53 +639,19 @@ impl Publication {
         self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Publication updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
-            )));
-        }
-        if self.status == status {
-            return Ok(true); // no need to update
+            )
+            .into());
         }
 
-        match self.status {
-            -1 if 0 != status => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication status is {}, expected update to 0, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            0 if !(-1..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication status is {}, expected update to -1 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            1 if !(-1..=2).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Publication status is {}, expected update to -1, 0 or 2, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            2 => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Publication status is {}, can not be updated", self.status),
-                )));
-            }
-            _ => {} // continue
+        self.valid_status(status)?;
+        if self.status == status {
+            return Ok(false); // no need to update
         }
 
         let new_updated_at = unix_ms() as i64;
@@ -589,9 +667,20 @@ impl Publication {
         );
 
         let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Publication update_status {} failed, please try again",
+                    status
+                ),
+            )
+            .into());
+        }
+
         self.updated_at = new_updated_at;
         self.status = status;
-        Ok(extract_applied(res))
+        Ok(true)
     }
 
     pub async fn delete(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
@@ -601,10 +690,11 @@ impl Publication {
         }
 
         if self.status == 2 {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 "Publication is published, can not be deleted".to_string(),
-            )));
+            )
+            .into());
         }
 
         self.get_one(db, Vec::new()).await?;
@@ -647,6 +737,21 @@ impl Publication {
         creation_gid: xid::Id,
         draft: PublicationDraft,
     ) -> anyhow::Result<Publication> {
+        let mut latest_draft = PublicationDraft::with_pk(draft.gid, draft.id);
+        latest_draft
+            .get_one(db, vec!["status".to_string(), "updated_at".to_string()])
+            .await?;
+
+        if latest_draft.status != 1 || latest_draft.updated_at != draft.updated_at {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "Invalid publication draft, status or updated_at not match, gid({}), id({}), cid({})",
+                    draft.gid, draft.id, draft.cid
+                ),
+            ).into());
+        }
+
         let now = unix_ms() as i64;
         let draft_gid = draft.gid;
         let draft_id = draft.id;
@@ -678,7 +783,7 @@ impl Publication {
 
         // add language to creation
         let query =
-            "UPDATE creation SET active_languages=active_languages+?,updated_at=? WHERE gid=? AND id=? IF EXISTS";
+            "UPDATE creation SET active_languages=active_languages+{?},updated_at=? WHERE gid=? AND id=? IF EXISTS";
         let params = (
             publication.language.to_cql()?,
             now,
@@ -694,5 +799,493 @@ impl Publication {
         let _ = db.execute(query, params).await?;
 
         Ok(publication)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ciborium::cbor;
+    use std::{str::FromStr, time::Duration};
+    use tokio::time;
+
+    use crate::conf;
+    use crate::db;
+    use axum_web::erring;
+    use tokio::sync::OnceCell;
+
+    use super::*;
+
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
+
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
+        DB.get_or_init(|| async {
+            let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "writing_test").await;
+            res.unwrap()
+        })
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn test_all() -> anyhow::Result<()> {
+        // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
+        publication_draft_model_works().await?;
+        publication_draft_find_works().await?;
+        publication_model_works().await?;
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn publication_draft_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::Id::from_str(db::USER_JARVIS).unwrap();
+        let id = xid::new();
+        let cid = xid::new();
+
+        // valid_status
+        {
+            let mut doc = PublicationDraft::with_pk(gid, id);
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = -1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_err());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_err());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 2;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_err());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+        }
+
+        // create
+        {
+            let mut doc = PublicationDraft::with_pk(gid, id);
+            doc.cid = cid;
+            doc.language = Language::Eng;
+            doc.version = 2;
+            doc.title = "Hello World".to_string();
+
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            assert!(doc.save(db).await?);
+            let res = doc.save(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
+            assert_eq!(err.code, 409);
+
+            let mut doc2 = PublicationDraft::with_pk(gid, id);
+            doc2.get_one(db, vec![]).await?;
+
+            assert_eq!(doc2.cid, cid);
+            assert_eq!(doc2.title.as_str(), "Hello World");
+            assert_eq!(doc2.version, 2);
+            assert_eq!(doc2.language, Language::Eng);
+
+            let mut doc3 = PublicationDraft::with_pk(gid, id);
+            doc3.get_one(db, vec!["cid".to_string(), "title".to_string()])
+                .await?;
+            assert_eq!(doc3.title.as_str(), "Hello World");
+            assert_eq!(doc3.version, 0);
+            assert_eq!(doc3.language, Language::default());
+            assert_eq!(doc3._fields, vec!["cid", "title"]);
+        }
+
+        // update
+        {
+            let mut doc = PublicationDraft::with_pk(gid, id);
+            let mut cols = ColumnsMap::new();
+            cols.set_as("status", &2i8)?;
+            let res = doc.update(db, cols, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400); // status is not updatable
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("title", &"update title 1".to_string())?;
+            let res = doc.update(db, cols, 1).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409); // updated_at not match
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("title", &"title 1".to_string())?;
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+
+            let mut cols = ColumnsMap::new();
+            cols.set_as("model", &"GPT-4".to_string())?;
+            cols.set_as("title", &"title 2".to_string())?;
+            cols.set_as("description", &"description 2".to_string())?;
+            cols.set_as("cover", &"cover 2".to_string())?;
+            cols.set_as("keywords", &vec!["keyword".to_string()])?;
+            cols.set_as("authors", &vec!["author 1".to_string()])?;
+            cols.set_as("summary", &"summary 2".to_string())?;
+
+            let mut content: Vec<u8> = Vec::new();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
+                    "content" => [{
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World 2",
+                        }],
+                    }],
+                })?,
+                &mut content,
+            )?;
+            cols.set_as("content", &content)?;
+            cols.set_as("license", &"license 2".to_string())?;
+            let res = doc.update(db, cols, doc.updated_at).await?;
+            assert!(res);
+        }
+
+        // update status
+        {
+            let mut doc = PublicationDraft::with_pk(gid, id);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_status(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 2, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
+        // delete
+        {
+            let mut backup = PublicationDraft::with_pk(gid, id);
+            backup.get_one(db, vec![]).await?;
+            backup.updated_at = 0;
+
+            let mut deleted = PublicationDraft::with_pk(gid, id);
+            let res = deleted.get_deleted(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut doc = PublicationDraft::with_pk(gid, id);
+            let res = doc.delete(db, 0).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let res = doc.delete(db, 2).await?;
+            assert!(res);
+
+            let res = doc.delete(db, 2).await?;
+            assert!(!res); // already deleted
+
+            deleted.get_deleted(db).await?;
+            deleted.updated_at = 0;
+            assert_eq!(deleted, backup);
+        }
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn publication_draft_find_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::new();
+        let mut content: Vec<u8> = Vec::new();
+        ciborium::into_writer(
+            &cbor!({
+                "type" => "doc",
+                "content" => [],
+            })?,
+            &mut content,
+        )?;
+
+        let mut docs: Vec<PublicationDraft> = Vec::new();
+        for i in 0..10 {
+            let mut doc = PublicationDraft::with_pk(gid, xid::new());
+            doc.cid = xid::new();
+            doc.language = Language::Zho;
+            doc.version = 1;
+            doc.title = format!("Hello World {}", i);
+            doc.content = content.clone();
+            doc.save(db).await?;
+
+            docs.push(doc)
+        }
+        assert_eq!(docs.len(), 10);
+
+        let latest = PublicationDraft::find(db, gid, Vec::new(), 1, None, None).await?;
+        assert_eq!(latest.len(), 1);
+        let mut latest = latest[0].to_owned();
+        assert_eq!(latest.gid, docs.last().unwrap().gid);
+        assert_eq!(latest.id, docs.last().unwrap().id);
+
+        latest.update_status(db, 1, latest.updated_at).await?;
+        let res =
+            PublicationDraft::find(db, gid, vec!["title".to_string()], 100, None, None).await?;
+        assert_eq!(res.len(), 10);
+
+        let res =
+            PublicationDraft::find(db, gid, vec!["title".to_string()], 100, None, Some(1)).await?;
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].id, docs.last().unwrap().id);
+
+        let res = PublicationDraft::find(db, gid, vec!["title".to_string()], 5, None, None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[5].id);
+
+        let res = PublicationDraft::find(
+            db,
+            gid,
+            vec!["title".to_string()],
+            5,
+            Some(docs[5].id),
+            None,
+        )
+        .await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[0].id);
+
+        let res = PublicationDraft::find(
+            db,
+            gid,
+            vec!["title".to_string()],
+            5,
+            Some(docs[5].id),
+            Some(1),
+        )
+        .await?;
+        assert_eq!(res.len(), 0);
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn publication_model_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::Id::from_str(db::USER_JARVIS).unwrap();
+        let draft_id = xid::new();
+        let cid = xid::new();
+
+        // valid_status
+        {
+            let mut doc = Publication::with_pk(cid, Language::Zho, 1);
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = -1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_err());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_err());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 2;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_err());
+            assert!(doc.valid_status(0).is_err());
+            assert!(doc.valid_status(1).is_err());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+        }
+
+        // create
+        {
+            let mut doc = Publication::with_pk(cid, Language::Zho, 1);
+            doc.title = "Hello World".to_string();
+
+            let res = doc.get_one(db, vec![]).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut creation = db::Creation::with_pk(gid, cid);
+            doc.language = Language::Eng;
+            doc.version = 1;
+            doc.title = "Hello World".to_string();
+            ciborium::into_writer(
+                &cbor!({
+                    "type" => "doc",
+                    "content" => [{
+                        "type" => "heading",
+                        "attrs" => {
+                            "id" => "Y3T1Ik",
+                            "level" => 1u8,
+                        },
+                        "content" => [{
+                            "type" => "text",
+                            "text" => "Hello World",
+                        }],
+                    }],
+                })?,
+                &mut doc.content,
+            )?;
+            assert!(creation.save(db).await?);
+
+            let mut draft = PublicationDraft::with_pk(gid, draft_id);
+            draft.cid = cid;
+            draft.language = Language::Zho;
+            draft.version = 1;
+            draft.title = "你好，世界".to_string();
+            assert!(draft.save(db).await?);
+
+            let res = Publication::save_from(db, gid, draft.clone()).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            draft.update_status(db, 1, draft.updated_at).await?;
+            time::sleep(Duration::from_millis(5)).await;
+
+            let res = Publication::save_from(db, gid, draft).await?;
+            assert_eq!(res.id, cid);
+            assert_eq!(res.language, Language::Zho);
+            assert_eq!(res.version, 1);
+            assert_eq!(res.status, 0);
+
+            creation.get_one(db, vec![]).await?;
+            assert_eq!(creation.updated_at, res.created_at);
+            assert_eq!(creation.active_languages, HashSet::from([Language::Zho]));
+
+            let mut draft = PublicationDraft::with_pk(gid, draft_id);
+            draft.get_one(db, vec![]).await?;
+            assert_eq!(draft.updated_at, res.created_at);
+            assert_eq!(draft.status, 2);
+
+            draft.status = 1;
+            let res = Publication::save_from(db, gid, draft.clone()).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            draft.update_status(db, 1, creation.updated_at).await?;
+            draft.language = Language::Aaa;
+            draft.version = 1;
+            draft.title = "Hello World~~".to_string();
+            creation.delete(db, 1).await?;
+            time::sleep(Duration::from_millis(5)).await;
+            let res = Publication::save_from(db, gid, draft).await?;
+            assert_eq!(res.id, cid);
+            assert_eq!(res.language, Language::Aaa);
+            assert_eq!(res.version, 1);
+            assert_eq!(res.status, 0);
+
+            let ok = creation.get_one(db, vec![]).await;
+            assert!(ok.is_err());
+            let err: erring::HTTPError = ok.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut doc = Publication::with_pk(cid, Language::Zho, 1);
+            doc.get_one(db, vec![]).await?;
+            assert_eq!(doc.title.as_str(), "你好，世界");
+
+            let mut doc = Publication::with_pk(cid, Language::Aaa, 1);
+            doc.get_one(db, vec![]).await?;
+            assert_eq!(doc.title.as_str(), "Hello World~~");
+        }
+
+        // update status
+        {
+            let mut doc = Publication::with_pk(cid, Language::Zho, 1);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_status(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 2, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(!res);
+
+            let res = doc.update_status(db, 2, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 400);
+        }
+
+        // delete
+        {
+            let mut backup = Publication::with_pk(cid, Language::Aaa, 1);
+            backup.get_one(db, vec![]).await?;
+            backup.updated_at = 0;
+
+            let mut deleted = Publication::with_pk(cid, Language::Aaa, 1);
+            let res = deleted.get_deleted(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut doc = Publication::with_pk(cid, Language::Zho, 1);
+            let res = doc.delete(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 409);
+
+            let mut doc = Publication::with_pk(cid, Language::Aaa, 1);
+
+            let res = doc.delete(db).await?;
+            assert!(res);
+            let res = doc.delete(db).await?;
+            assert!(!res); // already deleted
+
+            deleted.get_deleted(db).await?;
+            deleted.updated_at = 0;
+            assert_eq!(deleted, backup);
+        }
+
+        Ok(())
     }
 }

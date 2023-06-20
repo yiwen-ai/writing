@@ -107,7 +107,11 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .patch(api::collection::update)
                         .delete(api::collection::delete),
                 )
-                .route("/list", routing::post(api::collection::list)),
+                .route("/list", routing::post(api::collection::list))
+                .route(
+                    "/update_status",
+                    routing::patch(api::collection::update_status),
+                ),
         )
         .nest(
             "/v1/sys",
@@ -146,24 +150,28 @@ mod tests {
 
     static SERVER: OnceCell<(SocketAddr, reqwest::Client)> = OnceCell::const_new();
 
-    async fn get_server() -> (SocketAddr, reqwest::Client) {
-        let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let (_, app) = new(cfg.clone()).await.unwrap();
+    async fn get_server() -> &'static (SocketAddr, reqwest::Client) {
+        SERVER
+            .get_or_init(|| async {
+                let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
+                let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+                let addr = listener.local_addr().unwrap();
+                let (_, app) = new(cfg).await.unwrap();
 
-        tokio::spawn(async move {
-            let _ = axum::Server::from_tcp(listener)
-                .unwrap()
-                .serve(app.into_make_service())
-                .await;
-        });
+                tokio::spawn(async move {
+                    let _ = axum::Server::from_tcp(listener)
+                        .unwrap()
+                        .serve(app.into_make_service())
+                        .await;
+                });
 
-        time::sleep(time::Duration::from_millis(100)).await;
-        (
-            addr,
-            reqwest::ClientBuilder::new().gzip(true).build().unwrap(),
-        )
+                time::sleep(time::Duration::from_millis(100)).await;
+                (
+                    addr,
+                    reqwest::ClientBuilder::new().gzip(true).build().unwrap(),
+                )
+            })
+            .await
     }
 
     fn encode_cbor(val: &ciborium::Value) -> anyhow::Result<Vec<u8>> {
@@ -183,7 +191,7 @@ mod tests {
     }
 
     async fn healthz_api_works() -> anyhow::Result<()> {
-        let (addr, client) = SERVER.get_or_init(get_server).await;
+        let (addr, client) = get_server().await;
 
         let res = client
             .get(format!("http://{}/healthz", addr))
@@ -223,7 +231,7 @@ mod tests {
     }
 
     async fn api_works_with_json_and_cbor() -> anyhow::Result<()> {
-        let (addr, client) = SERVER.get_or_init(get_server).await;
+        let (addr, client) = get_server().await;
 
         let content = encode_cbor(
             &cbor!({

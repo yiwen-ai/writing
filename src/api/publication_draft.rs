@@ -253,10 +253,7 @@ pub async fn create(
     }
 
     let ok = draft.save(&app.scylla).await?;
-    if !ok {
-        return Err(HTTPError::new(409, "Create draft failed".to_string()));
-    }
-
+    ctx.set("created", ok.into()).await;
     Ok(to.with(SuccessResponse::new(PublicationDraftOutput::from(
         draft, &to,
     ))))
@@ -404,10 +401,7 @@ impl UpdatePublicationDraftInput {
         }
 
         if cols.is_empty() {
-            return Err(anyhow::Error::new(HTTPError::new(
-                400,
-                "No fields to update".to_string(),
-            )));
+            return Err(HTTPError::new(400, "No fields to update".to_string()).into());
         }
 
         Ok(cols)
@@ -435,12 +429,9 @@ pub async fn update(
     .await;
 
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
-    if !ok {
-        return Err(HTTPError::new(409, "Creation update failed".to_string()));
-    }
+    ctx.set("updated", ok.into()).await;
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
-
     Ok(to.with(SuccessResponse::new(PublicationDraftOutput::from(doc, &to))))
 }
 
@@ -469,13 +460,7 @@ pub async fn update_status(
     let ok = doc
         .update_status(&app.scylla, input.status, input.updated_at)
         .await?;
-    if !ok {
-        return Err(HTTPError::new(
-            409,
-            "Publication draft update failed".to_string(),
-        ));
-    }
-
+    ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(PublicationDraftOutput::from(doc, &to))))
 }

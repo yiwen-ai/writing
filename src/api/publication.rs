@@ -252,12 +252,7 @@ pub async fn update_status(
     let ok = doc
         .update_status(&app.scylla, input.status, input.updated_at)
         .await?;
-    if !ok {
-        return Err(HTTPError::new(
-            409,
-            "Publication draft update failed".to_string(),
-        ));
-    }
+    ctx.set("updated", ok.into()).await;
 
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
@@ -338,7 +333,9 @@ pub async fn batch_get(
             if item
                 .get_one(&app.scylla, select_fields.clone())
                 .await
-                .is_ok() && item.status >= min_status {
+                .is_ok()
+                && item.status >= min_status
+            {
                 item._rating = ratings_map.get(&id).unwrap().to_owned();
                 res.push(item);
             }

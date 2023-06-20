@@ -48,10 +48,7 @@ impl CreationIndex {
         use std::ops::Sub;
         let now = SystemTime::now().sub(Duration::from_secs(10));
         if self.id.time() < now {
-            return Err(anyhow::Error::new(HTTPError::new(
-                400,
-                format!("Invalid id {:?}", self.id),
-            )));
+            return Err(HTTPError::new(400, format!("Invalid id {:?}", self.id)).into());
         }
 
         self._fields = Self::fields();
@@ -94,7 +91,7 @@ impl CreationIndex {
     }
 }
 
-#[derive(Debug, Default, Clone, CqlOrm)]
+#[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Creation {
     pub gid: xid::Id,
     pub id: xid::Id,
@@ -138,10 +135,7 @@ impl Creation {
         let fields = Self::fields();
         for field in &select_fields {
             if !fields.contains(field) {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Invalid field: {}", field),
-                )));
+                return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
 
@@ -159,6 +153,48 @@ impl Creation {
         }
 
         Ok(select_fields)
+    }
+
+    pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
+        if !(-1..=2).contains(&status) {
+            return Err(HTTPError::new(400, format!("Invalid status, {}", status)).into());
+        }
+
+        match self.status {
+            -1 if !(-1..=1).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Creation status is {}, expected update to 0 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            0 if !(-1..=1).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Creation status is {}, expected update to -1 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            1 if !(-1..=2).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Creation status is {}, expected update to -1, 0 or 2, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            2 if !(-1..=2).contains(&status) => Err(HTTPError::new(
+                400,
+                format!(
+                    "Creation status is {}, expected update to -1, 0 or 1, got {}",
+                    self.status, status
+                ),
+            )
+            .into()),
+            _ => Ok(()),
+        }
     }
 
     pub async fn get_one(
@@ -183,18 +219,37 @@ impl Creation {
         Ok(())
     }
 
+    pub async fn get_deleted(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
+        let fields = Self::fields();
+        self._fields = fields.clone();
+
+        let query = format!(
+            "SELECT {} FROM deleted_creation WHERE gid=? AND id=? LIMIT 1",
+            fields.join(",")
+        );
+        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let res = db.execute(query, params).await?.single_row()?;
+
+        let mut cols = ColumnsMap::with_capacity(fields.len());
+        cols.fill(res, fields)?;
+        self.fill(&cols);
+
+        Ok(())
+    }
+
     pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
         let mut index = CreationIndex::with_pk(self.id);
         index.gid = self.gid;
         let ok = index.save(db).await?;
         if !ok {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Creation already exists, gid({}), id({})",
                     self.gid, self.id
                 ),
-            )));
+            )
+            .into());
         }
 
         let now = unix_ms() as i64;
@@ -223,7 +278,15 @@ impl Creation {
         );
 
         let res = db.execute(query, params).await?;
-        Ok(extract_applied(res))
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!("Creation {} save failed, please try again", self.id),
+            )
+            .into());
+        }
+
+        Ok(true)
     }
 
     pub async fn update_status(
@@ -235,58 +298,20 @@ impl Creation {
         self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
             .await?;
         if self.updated_at != updated_at {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Creation updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
-            )));
+            )
+            .into());
         }
+        self.valid_status(status)?;
+
         if self.status == status {
-            return Ok(true); // no need to update
+            return Ok(false); // no need to update
         }
-
-        match self.status {
-            -1 if !(0..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Creation status is {}, expected update to 0 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            0 if !(-1..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Creation status is {}, expected update to -1 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            1 if !(-1..=2).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Creation status is {}, expected update to -1, 0 or 2, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            2 if !(-1..=1).contains(&status) => {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!(
-                        "Creation status is {}, expected update to -1, 0 or 1, got {}",
-                        self.status, status
-                    ),
-                )));
-            }
-            _ => {} // continue
-        }
-
         let new_updated_at = unix_ms() as i64;
         let query =
             "UPDATE creation SET status=?,updated_at=? WHERE gid=? AND id=? IF updated_at=?";
@@ -299,9 +324,17 @@ impl Creation {
         );
 
         let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!("Creation update_status {} failed, please try again", status),
+            )
+            .into());
+        }
+
         self.updated_at = new_updated_at;
         self.status = status;
-        Ok(extract_applied(res))
+        Ok(true)
     }
 
     pub async fn update(
@@ -324,10 +357,7 @@ impl Creation {
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
-                return Err(anyhow::Error::new(HTTPError::new(
-                    400,
-                    format!("Invalid field: {}", field),
-                )));
+                return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
 
@@ -341,19 +371,21 @@ impl Creation {
         )
         .await?;
         if self.updated_at != updated_at {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Creation updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
-            )));
+            )
+            .into());
         }
         if self.status < 0 || self.status > 1 {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!("Creation can not be update, status {}", self.status),
-            )));
+            )
+            .into());
         }
 
         let mut incr = 1usize; // should add `updated_at`
@@ -387,9 +419,17 @@ impl Creation {
         params.push(CqlValue::BigInt(updated_at));
 
         let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!("Creation {} update failed, please try again", self.id),
+            )
+            .into());
+        }
+
         self.updated_at = new_updated_at;
         self.version = new_version;
-        Ok(extract_applied(res))
+        Ok(true)
     }
 
     pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
@@ -399,13 +439,14 @@ impl Creation {
         }
 
         if self.version != version {
-            return Err(anyhow::Error::new(HTTPError::new(
+            return Err(HTTPError::new(
                 409,
                 format!(
                     "Creation version conflict, expected version {}, got {}",
                     self.version, version
                 ),
-            )));
+            )
+            .into());
         }
 
         self.get_one(db, Vec::new()).await?;
@@ -507,19 +548,20 @@ impl Creation {
 mod tests {
     use ciborium::cbor;
     use std::str::FromStr;
-    use tokio::sync::OnceCell;
 
     use crate::conf;
+    use crate::db;
     use axum_web::erring;
+    use tokio::sync::OnceCell;
 
     use super::*;
 
-    static DB: OnceCell<scylladb::ScyllaDB> = OnceCell::const_new();
+    static DB: OnceCell<db::scylladb::ScyllaDB> = OnceCell::const_new();
 
-    async fn get_db() -> &'static scylladb::ScyllaDB {
+    async fn get_db() -> &'static db::scylladb::ScyllaDB {
         DB.get_or_init(|| async {
             let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-            let res = scylladb::ScyllaDB::new(cfg.scylla, "writing_test").await;
+            let res = db::scylladb::ScyllaDB::new(cfg.scylla, "writing_test").await;
             res.unwrap()
         })
         .await
@@ -531,10 +573,12 @@ mod tests {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
         creation_index_model_works().await?;
         creation_model_works().await?;
+        creation_find_works().await?;
 
         Ok(())
     }
 
+    // #[tokio::test(flavor = "current_thread")]
     async fn creation_index_model_works() -> anyhow::Result<()> {
         let db = get_db().await;
 
@@ -574,17 +618,50 @@ mod tests {
         Ok(())
     }
 
+    // #[tokio::test(flavor = "current_thread")]
     async fn creation_model_works() -> anyhow::Result<()> {
-        assert!(Creation::fields().contains(&"license".to_string()));
-        assert!(!Creation::fields().contains(&"_fields".to_string()));
-
         let db = get_db().await;
-        let did = xid::new();
-        let uid = xid::Id::from_str("jarvis00000000000000")?;
+        let gid = xid::Id::from_str(db::USER_JARVIS).unwrap();
+        let cid = xid::new();
+
+        // valid_status
+        {
+            let mut doc = Creation::with_pk(gid, cid);
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = -1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_err());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 1;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+
+            doc.status = 2;
+            assert!(doc.valid_status(-2).is_err());
+            assert!(doc.valid_status(-1).is_ok());
+            assert!(doc.valid_status(0).is_ok());
+            assert!(doc.valid_status(1).is_ok());
+            assert!(doc.valid_status(2).is_ok());
+            assert!(doc.valid_status(3).is_err());
+        }
 
         // create
         {
-            let mut doc = Creation::with_pk(uid, did);
+            let mut doc = Creation::with_pk(gid, cid);
             doc.language = Language::Eng;
             doc.title = "Hello World".to_string();
             ciborium::into_writer(
@@ -616,7 +693,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
             assert_eq!(err.code, 409);
 
-            let mut doc2 = Creation::with_pk(uid, did);
+            let mut doc2 = Creation::with_pk(gid, cid);
             doc2.get_one(db, vec![]).await?;
             // println!("doc: {:#?}", doc2);
 
@@ -625,7 +702,7 @@ mod tests {
             assert_eq!(doc2.language, Language::Eng);
             assert_eq!(doc2.content, doc.content);
 
-            let mut doc3 = Creation::with_pk(uid, did);
+            let mut doc3 = Creation::with_pk(gid, cid);
             doc3.get_one(db, vec!["gid".to_string(), "title".to_string()])
                 .await?;
             assert_eq!(doc3.title.as_str(), "Hello World");
@@ -637,7 +714,7 @@ mod tests {
 
         // update
         {
-            let mut doc = Creation::with_pk(uid, did);
+            let mut doc = Creation::with_pk(gid, cid);
             let mut cols = ColumnsMap::new();
             cols.set_as("status", &2i8)?;
             let res = doc.update(db, cols, 0).await;
@@ -666,7 +743,6 @@ mod tests {
             cols.set_as("keywords", &vec!["keyword".to_string()])?;
             cols.set_as("labels", &vec!["label 1".to_string()])?;
             cols.set_as("authors", &vec!["author 1".to_string()])?;
-            cols.set_as("summary", &"summary 2".to_string())?;
 
             let mut content: Vec<u8> = Vec::new();
             ciborium::into_writer(
@@ -693,9 +769,37 @@ mod tests {
             assert_eq!(doc.version, 2);
         }
 
+        // update status
+        {
+            let mut doc = Creation::with_pk(gid, cid);
+            doc.get_one(db, vec![]).await?;
+
+            let res = doc.update_status(db, 2, doc.updated_at - 1).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 2, doc.updated_at).await;
+            assert!(res.is_err());
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(res);
+
+            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            assert!(!res);
+        }
+
         // delete
         {
-            let mut doc = Creation::with_pk(uid, did);
+            let mut backup = Creation::with_pk(gid, cid);
+            backup.get_one(db, vec![]).await?;
+            backup.updated_at = 0;
+
+            let mut deleted = Creation::with_pk(gid, cid);
+            let res = deleted.get_deleted(db).await;
+            assert!(res.is_err());
+            let err: erring::HTTPError = res.unwrap_err().into();
+            assert_eq!(err.code, 404);
+
+            let mut doc = Creation::with_pk(gid, cid);
             let res = doc.delete(db, 0).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
@@ -706,7 +810,80 @@ mod tests {
 
             let res = doc.delete(db, 2).await?;
             assert!(!res); // already deleted
+
+            deleted.get_deleted(db).await?;
+            deleted.updated_at = 0;
+            assert_eq!(deleted, backup);
         }
+
+        Ok(())
+    }
+
+    // #[tokio::test(flavor = "current_thread")]
+    async fn creation_find_works() -> anyhow::Result<()> {
+        let db = get_db().await;
+        let gid = xid::new();
+        let mut content: Vec<u8> = Vec::new();
+        ciborium::into_writer(
+            &cbor!({
+                "type" => "doc",
+                "content" => [],
+            })?,
+            &mut content,
+        )?;
+
+        let mut docs: Vec<Creation> = Vec::new();
+        for i in 0..10 {
+            let mut doc = Creation::with_pk(gid, xid::new());
+            doc.language = Language::Eng;
+            doc.title = format!("Hello World {}", i);
+            doc.content = content.clone();
+            doc.save(db).await?;
+
+            docs.push(doc)
+        }
+        assert_eq!(docs.len(), 10);
+
+        let latest = Creation::find(db, gid, Vec::new(), 1, None, None).await?;
+        assert_eq!(latest.len(), 1);
+        let mut latest = latest[0].to_owned();
+        assert_eq!(latest.gid, docs.last().unwrap().gid);
+        assert_eq!(latest.id, docs.last().unwrap().id);
+
+        latest.update_status(db, 1, latest.updated_at).await?;
+        let res = Creation::find(db, gid, vec!["title".to_string()], 100, None, None).await?;
+        assert_eq!(res.len(), 10);
+
+        let res = Creation::find(db, gid, vec!["title".to_string()], 100, None, Some(1)).await?;
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].id, docs.last().unwrap().id);
+
+        let res = Creation::find(db, gid, vec!["title".to_string()], 5, None, None).await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[5].id);
+
+        let res = Creation::find(
+            db,
+            gid,
+            vec!["title".to_string()],
+            5,
+            Some(docs[5].id),
+            None,
+        )
+        .await?;
+        assert_eq!(res.len(), 5);
+        assert_eq!(res[4].id, docs[0].id);
+
+        let res = Creation::find(
+            db,
+            gid,
+            vec!["title".to_string()],
+            5,
+            Some(docs[5].id),
+            Some(1),
+        )
+        .await?;
+        assert_eq!(res.len(), 0);
 
         Ok(())
     }
