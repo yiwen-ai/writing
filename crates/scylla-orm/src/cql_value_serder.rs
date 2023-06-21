@@ -162,7 +162,7 @@ impl CqlValueSerder for xid::Id {
 impl CqlValueSerder for isolang::Language {
     fn from_cql(val: &CqlValue) -> anyhow::Result<Self> {
         match val {
-            CqlValue::Ascii(val) => match isolang::Language::from_str(val) {
+            CqlValue::Text(val) => match isolang::Language::from_str(val) {
                 Ok(lang) => Ok(lang),
                 Err(err) => Err(anyhow::Error::msg(format!(
                     "CqlValueSerder::from_cql for isolang::Language: parse {:?} error: {:?}",
@@ -177,7 +177,7 @@ impl CqlValueSerder for isolang::Language {
     }
 
     fn to_cql(&self) -> anyhow::Result<CqlValue> {
-        Ok(CqlValue::Ascii(self.to_639_3().to_string()))
+        Ok(CqlValue::Text(self.to_639_3().to_string()))
     }
 }
 

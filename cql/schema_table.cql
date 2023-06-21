@@ -15,11 +15,11 @@ CREATE TABLE IF NOT EXISTS creation (
     status           TINYINT,     -- int8, -1: Archived, 0: Draft, 1: Review, 2: Approved
     rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     version          SMALLINT,    -- creation version
-    language         ASCII,       -- creation's language, ISO 639-3
+    language         TEXT,        -- creation's language, ISO 639-3
     creator          BLOB,        -- user id who create the creation.
     created_at       BIGINT,      -- create at, unix time, ms
     updated_at       BIGINT,      -- update at
-    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
+    active_languages SET<TEXT>,   -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
     genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
@@ -44,7 +44,7 @@ CREATE INDEX creation_gid_status ON creation ((gid), status);
 
 CREATE TABLE IF NOT EXISTS publication (
     id           BLOB,       -- creation id
-    language     ASCII,      -- publication's language, ISO 639-3
+    language     TEXT,       -- publication's language, ISO 639-3
     version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS publication_draft (
     gid          BLOB,       -- group id, publication draft belong to
     id           BLOB,       -- draft id
     cid          BLOB,       -- creation id
-    language     ASCII,      -- draft's language, ISO 639-3
+    language     TEXT,       -- draft's language, ISO 639-3
     version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
@@ -103,7 +103,7 @@ CREATE INDEX publication_draft_gid_status ON publication_draft ((gid), status);
 CREATE TABLE IF NOT EXISTS comment (
     cid         BLOB,    -- creation id comment to, 12 bytes XID
     id          BLOB,    -- comment id, 12 bytes XID
-    language    ASCII,   -- comment's language
+    language    TEXT,    -- comment's language
     status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
     creator     BLOB,    -- comment's creator id, 12 bytes XID
     created_at  BIGINT,  -- create at, unix time with second precision.
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
     cid         BLOB,        -- creation id, 12 bytes XID
-    language    ASCII,       -- creation language
+    language    TEXT,        -- creation language
     version     SMALLINT,    -- creation version
     status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
     updated_at  BIGINT,      -- update at, unix time with second precision.
@@ -151,13 +151,13 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     status           TINYINT,     -- int8, -1: Archived, 0: Draft, 1: Review, 2: Approved
     rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     version          SMALLINT,    -- creation version
-    language         ASCII,       -- creation's language, ISO 639-3
+    language         TEXT,        -- creation's language, ISO 639-3
     creator          BLOB,        -- user id who create the creation.
     created_at       BIGINT,      -- create at
     updated_at       BIGINT,      -- update at
-    active_languages SET<ASCII>,  -- active languages by translation, ISO 639-3
+    active_languages SET<TEXT>,   -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
-    genre            LIST<TEXT>, -- genre
+    genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
     description      TEXT,        -- description
     cover            TEXT,        -- cover url
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
 
 CREATE TABLE IF NOT EXISTS deleted_publication (
     id           BLOB,       -- creation id
-    language     ASCII,      -- publication's language, ISO 639-3
+    language     TEXT,       -- publication's language, ISO 639-3
     version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS deleted_publication_draft (
     gid          BLOB,       -- group id, publication draft belong to
     id           BLOB,       -- draft id
     cid          BLOB,       -- creation id
-    language     ASCII,      -- draft's language, ISO 639-3
+    language     TEXT,       -- draft's language, ISO 639-3
     version      SMALLINT,   -- creation version
     status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
     creator      BLOB,       -- user id who create the publication.
@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS deleted_publication_draft (
 CREATE TABLE IF NOT EXISTS deleted_comment (
     cid         BLOB,    -- creation id comment to, 12 bytes XID
     id          BLOB,    -- comment id, 12 bytes XID
-    language    ASCII,   -- comment's language
+    language    TEXT,    -- comment's language
     status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
     creator     BLOB,    -- comment's creator id, 12 bytes XID
     created_at  BIGINT,  -- create at, unix time with second precision.
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS deleted_collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
     cid         BLOB,        -- creation id, 12 bytes XID
-    language    ASCII,       -- creation language
+    language    TEXT,        -- creation language
     version     SMALLINT,    -- creation version
     status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
     updated_at  BIGINT,      -- update at, unix time with second precision.
