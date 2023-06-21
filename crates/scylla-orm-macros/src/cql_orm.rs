@@ -50,12 +50,12 @@ pub fn cql_orm(input: TokenStream) -> TokenStream {
                 )*
             }
 
-            pub fn to(&self) -> anyhow::Result<scylla_orm::ColumnsMap> {
+            pub fn to(&self) -> scylla_orm::ColumnsMap {
                 let mut cols = scylla_orm::ColumnsMap::with_capacity(#fields_num);
                 #(
-                    cols.set_as(#field_names_string3, &self.#field_names1)?;
+                    cols.set_as(#field_names_string3, &self.#field_names1);
                 )*
-                Ok(cols)
+                cols
             }
         }
     };

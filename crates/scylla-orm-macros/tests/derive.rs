@@ -28,7 +28,7 @@ fn derive_cql_orm_works() {
         _fields: vec!["content".to_string()],
     };
 
-    let cols = doc.to().unwrap();
+    let cols = doc.to();
     assert_eq!(cols.len(), 5);
     assert_eq!(cols.get_as::<xid::Id>("id").unwrap(), doc.id);
     assert!(!cols.has("_fields"));

@@ -1,12 +1,12 @@
 use isolang::Language;
 use std::{collections::HashSet, convert::From};
 
-use scylla_orm::{ColumnsMap, CqlValueSerder};
+use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
     scylladb,
-    scylladb::{extract_applied, CqlValue, Query},
+    scylladb::{extract_applied, Query},
 };
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -168,7 +168,7 @@ impl PublicationDraft {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -357,7 +357,7 @@ impl PublicationDraft {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut insert_params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -585,14 +585,14 @@ impl Publication {
                 "SELECT {} FROM publication WHERE id=? AND language=? AND version=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql()?, self.version);
+            let params = (self.id.as_bytes(), self.language.to_cql(), self.version);
             db.execute(query, params).await?.single_row()?
         } else {
             let query = format!(
                 "SELECT {} FROM publication WHERE id=? AND language=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql()?);
+            let params = (self.id.as_bytes(), self.language.to_cql());
             db.execute(query, params).await?.single_row()?
         };
 
@@ -612,14 +612,14 @@ impl Publication {
                 "SELECT {} FROM deleted_publication WHERE id=? AND language=? AND version=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql()?, self.version);
+            let params = (self.id.as_bytes(), self.language.to_cql(), self.version);
             db.execute(query, params).await?.single_row()?
         } else {
             let query = format!(
                 "SELECT {} FROM deleted_publication WHERE id=? AND language=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql()?);
+            let params = (self.id.as_bytes(), self.language.to_cql());
             db.execute(query, params).await?.single_row()?
         };
 
@@ -661,7 +661,7 @@ impl Publication {
             status,
             new_updated_at,
             self.id.as_bytes(),
-            self.language.to_cql()?,
+            self.language.to_cql(),
             self.version,
             updated_at,
         );
@@ -706,7 +706,7 @@ impl Publication {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut insert_params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -721,7 +721,7 @@ impl Publication {
         );
 
         let delete_query = "DELETE FROM publication WHERE id=? AND language=? AND version=?";
-        let delete_params = (self.id.as_bytes(), self.language.to_cql()?, self.version);
+        let delete_params = (self.id.as_bytes(), self.language.to_cql(), self.version);
 
         let _ = db
             .batch(
@@ -765,7 +765,7 @@ impl Publication {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = publication.to()?;
+        let cols = publication.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -785,7 +785,7 @@ impl Publication {
         let query =
             "UPDATE creation SET active_languages=active_languages+{?},updated_at=? WHERE gid=? AND id=? IF EXISTS";
         let params = (
-            publication.language.to_cql()?,
+            publication.language.to_cql(),
             now,
             creation_gid.as_bytes(),
             publication.id.as_bytes(),
@@ -919,32 +919,32 @@ mod tests {
         {
             let mut doc = PublicationDraft::with_pk(gid, id);
             let mut cols = ColumnsMap::new();
-            cols.set_as("status", &2i8)?;
+            cols.set_as("status", &2i8);
             let res = doc.update(db, cols, 0).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // status is not updatable
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"update title 1".to_string())?;
+            cols.set_as("title", &"update title 1".to_string());
             let res = doc.update(db, cols, 1).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // updated_at not match
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"title 1".to_string())?;
+            cols.set_as("title", &"title 1".to_string());
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("model", &"GPT-4".to_string())?;
-            cols.set_as("title", &"title 2".to_string())?;
-            cols.set_as("description", &"description 2".to_string())?;
-            cols.set_as("cover", &"cover 2".to_string())?;
-            cols.set_as("keywords", &vec!["keyword".to_string()])?;
-            cols.set_as("authors", &vec!["author 1".to_string()])?;
-            cols.set_as("summary", &"summary 2".to_string())?;
+            cols.set_as("model", &"GPT-4".to_string());
+            cols.set_as("title", &"title 2".to_string());
+            cols.set_as("description", &"description 2".to_string());
+            cols.set_as("cover", &"cover 2".to_string());
+            cols.set_as("keywords", &vec!["keyword".to_string()]);
+            cols.set_as("authors", &vec!["author 1".to_string()]);
+            cols.set_as("summary", &"summary 2".to_string());
 
             let mut content: Vec<u8> = Vec::new();
             ciborium::into_writer(
@@ -964,8 +964,8 @@ mod tests {
                 })?,
                 &mut content,
             )?;
-            cols.set_as("content", &content)?;
-            cols.set_as("license", &"license 2".to_string())?;
+            cols.set_as("content", &content);
+            cols.set_as("license", &"license 2".to_string());
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);
         }

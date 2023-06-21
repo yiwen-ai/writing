@@ -216,22 +216,22 @@ impl UpdateCollectionInput {
     fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
         if let Some(version) = self.version {
-            cols.set_as("version", &version)?;
+            cols.set_as("version", &version);
         }
         if let Some(title) = self.title {
-            cols.set_as("title", &title)?;
+            cols.set_as("title", &title);
         }
         if let Some(description) = self.description {
-            cols.set_as("description", &description)?;
+            cols.set_as("description", &description);
         }
         if let Some(cover) = self.cover {
-            cols.set_as("cover", &cover)?;
+            cols.set_as("cover", &cover);
         }
         if let Some(summary) = self.summary {
-            cols.set_as("summary", &summary)?;
+            cols.set_as("summary", &summary);
         }
         if let Some(labels) = self.labels {
-            cols.set_as("labels", &labels)?;
+            cols.set_as("labels", &labels);
         }
 
         if cols.is_empty() {

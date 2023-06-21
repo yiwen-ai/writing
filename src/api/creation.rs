@@ -273,31 +273,31 @@ impl UpdateCreationInput {
     fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
         if let Some(title) = self.title {
-            cols.set_as("title", &title)?;
+            cols.set_as("title", &title);
         }
         if let Some(description) = self.description {
-            cols.set_as("description", &description)?;
+            cols.set_as("description", &description);
         }
         if let Some(cover) = self.cover {
-            cols.set_as("cover", &cover)?;
+            cols.set_as("cover", &cover);
         }
         if let Some(keywords) = self.keywords {
-            cols.set_as("keywords", &keywords)?;
+            cols.set_as("keywords", &keywords);
         }
         if let Some(labels) = self.labels {
-            cols.set_as("labels", &labels)?;
+            cols.set_as("labels", &labels);
         }
         if let Some(authors) = self.authors {
-            cols.set_as("authors", &authors)?;
+            cols.set_as("authors", &authors);
         }
         if let Some(summary) = self.summary {
-            cols.set_as("summary", &summary)?;
+            cols.set_as("summary", &summary);
         }
         if let Some(content) = self.content {
-            cols.set_as("content", &content.unwrap())?;
+            cols.set_as("content", &content.unwrap());
         }
         if let Some(license) = self.license {
-            cols.set_as("license", &license)?;
+            cols.set_as("license", &license);
         }
 
         if cols.is_empty() {

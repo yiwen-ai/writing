@@ -9,12 +9,10 @@ use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
     batch::Batch,
-    frame::response::result::{ColumnType, CqlValue, Row},
+    frame::response::result::{ColumnType, Row},
     query::Query,
     Bytes,
 };
-
-pub use scylla_orm::{Ascii, ColumnsMap, CqlValueSerder};
 
 use crate::conf;
 

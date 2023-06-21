@@ -1,5 +1,5 @@
 mod columns;
-mod cql_value_serder;
+mod cql_value;
 
 pub use columns::*;
-pub use cql_value_serder::*;
+pub use cql_value::*;

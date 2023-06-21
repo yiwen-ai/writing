@@ -2,12 +2,12 @@ use isolang::Language;
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
-use scylla_orm::ColumnsMap;
+use scylla_orm::{ColumnsMap, CqlValue};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
     scylladb,
-    scylladb::{extract_applied, CqlValue, Query},
+    scylladb::{extract_applied, Query},
 };
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
@@ -123,7 +123,7 @@ impl Collection {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -300,7 +300,7 @@ impl Collection {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut insert_params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -500,31 +500,31 @@ mod tests {
         {
             let mut doc = Collection::with_pk(uid, id);
             let mut cols = ColumnsMap::new();
-            cols.set_as("status", &2i8)?;
+            cols.set_as("status", &2i8);
             let res = doc.update(db, cols, 0).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // status is not updatable
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"update title 1".to_string())?;
+            cols.set_as("title", &"update title 1".to_string());
             let res = doc.update(db, cols, 1).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // updated_at not match
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"title 1".to_string())?;
+            cols.set_as("title", &"title 1".to_string());
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("version", &2i16)?;
-            cols.set_as("title", &"title 2".to_string())?;
-            cols.set_as("description", &"description 2".to_string())?;
-            cols.set_as("cover", &"cover 2".to_string())?;
-            cols.set_as("summary", &"summary 2".to_string())?;
-            cols.set_as("labels", &vec!["label 1".to_string()])?;
+            cols.set_as("version", &2i16);
+            cols.set_as("title", &"title 2".to_string());
+            cols.set_as("description", &"description 2".to_string());
+            cols.set_as("cover", &"cover 2".to_string());
+            cols.set_as("summary", &"summary 2".to_string());
+            cols.set_as("labels", &vec!["label 1".to_string()]);
 
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);

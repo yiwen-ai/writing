@@ -6,12 +6,12 @@ use std::{
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
-use scylla_orm::{ColumnsMap, CqlValueSerder};
+use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
     scylladb,
-    scylladb::{extract_applied, CqlValue, Query},
+    scylladb::{extract_applied, Query},
 };
 
 #[derive(Debug, Default, Clone, CqlOrm)]
@@ -70,11 +70,11 @@ impl CreationIndex {
 
         for id in &ids {
             vals_name.push("?");
-            params.push(id.to_cql().unwrap());
+            params.push(id.to_cql());
         }
 
         let query = format!("SELECT id,gid,rating FROM creation_index WHERE id IN ({}) AND rating<=? ALLOW FILTERING", vals_name.join(","));
-        params.push(max_rating.to_cql().unwrap());
+        params.push(max_rating.to_cql());
         let res = db.execute(query, params).await?;
 
         let rows = res.rows.unwrap_or_default();
@@ -263,7 +263,7 @@ impl Creation {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -458,7 +458,7 @@ impl Creation {
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut insert_params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
-        let cols = self.to()?;
+        let cols = self.to();
 
         for field in &fields {
             cols_name.push(field);
@@ -716,33 +716,33 @@ mod tests {
         {
             let mut doc = Creation::with_pk(gid, cid);
             let mut cols = ColumnsMap::new();
-            cols.set_as("status", &2i8)?;
+            cols.set_as("status", &2i8);
             let res = doc.update(db, cols, 0).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // status is not updatable
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"update title 1".to_string())?;
+            cols.set_as("title", &"update title 1".to_string());
             let res = doc.update(db, cols, 1).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // updated_at not match
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"title 1".to_string())?;
+            cols.set_as("title", &"title 1".to_string());
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);
             assert_eq!(doc.version, 1);
 
             let mut cols = ColumnsMap::new();
-            cols.set_as("title", &"title 2".to_string())?;
-            cols.set_as("description", &"description 2".to_string())?;
-            cols.set_as("cover", &"cover 2".to_string())?;
-            cols.set_as("summary", &"summary 2".to_string())?;
-            cols.set_as("keywords", &vec!["keyword".to_string()])?;
-            cols.set_as("labels", &vec!["label 1".to_string()])?;
-            cols.set_as("authors", &vec!["author 1".to_string()])?;
+            cols.set_as("title", &"title 2".to_string());
+            cols.set_as("description", &"description 2".to_string());
+            cols.set_as("cover", &"cover 2".to_string());
+            cols.set_as("summary", &"summary 2".to_string());
+            cols.set_as("keywords", &vec!["keyword".to_string()]);
+            cols.set_as("labels", &vec!["label 1".to_string()]);
+            cols.set_as("authors", &vec!["author 1".to_string()]);
 
             let mut content: Vec<u8> = Vec::new();
             ciborium::into_writer(
@@ -762,8 +762,8 @@ mod tests {
                 })?,
                 &mut content,
             )?;
-            cols.set_as("content", &content)?;
-            cols.set_as("license", &"license 2".to_string())?;
+            cols.set_as("content", &content);
+            cols.set_as("license", &"license 2".to_string());
             let res = doc.update(db, cols, doc.updated_at).await?;
             assert!(res);
             assert_eq!(doc.version, 2);
