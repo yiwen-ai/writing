@@ -34,11 +34,11 @@ impl CreationIndex {
         self._fields = Self::fields();
 
         let query = "SELECT gid,rating FROM creation_index WHERE id=? LIMIT 1";
-        let params = (self.id.as_bytes(),);
+        let params = (self.id.to_cql(),);
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(2);
-        cols.fill(res, vec!["gid".to_string(), "rating".to_string()])?;
+        cols.fill(res, &vec!["gid".to_string(), "rating".to_string()])?;
         self.fill(&cols);
 
         Ok(())
@@ -53,9 +53,15 @@ impl CreationIndex {
 
         self._fields = Self::fields();
         let query = "INSERT INTO creation_index (id,gid,rating) VALUES (?,?,?) IF NOT EXISTS";
-        let params = (self.id.as_bytes(), self.gid.as_bytes(), self.rating);
+        let params = (self.id.to_cql(), self.gid.to_cql(), self.rating);
         let res = db.execute(query, params).await?;
-        Ok(extract_applied(res))
+        if !extract_applied(res) {
+            return Err(
+                HTTPError::new(409, format!("CreationIndex {} already exists", self.id)).into(),
+            );
+        }
+
+        Ok(true)
     }
 
     pub async fn batch_get(
@@ -81,7 +87,7 @@ impl CreationIndex {
         let mut res: Vec<CreationIndex> = Vec::with_capacity(rows.len());
         for r in rows {
             let mut cols = ColumnsMap::with_capacity(3);
-            cols.fill(r, fields.clone())?;
+            cols.fill(r, &fields)?;
             let mut item = CreationIndex::default();
             item.fill(&cols);
             res.push(item);
@@ -209,11 +215,11 @@ impl Creation {
             "SELECT {} FROM creation WHERE gid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let params = (self.gid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -227,11 +233,11 @@ impl Creation {
             "SELECT {} FROM deleted_creation WHERE gid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let params = (self.gid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -240,17 +246,7 @@ impl Creation {
     pub async fn save(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
         let mut index = CreationIndex::with_pk(self.id);
         index.gid = self.gid;
-        let ok = index.save(db).await?;
-        if !ok {
-            return Err(HTTPError::new(
-                409,
-                format!(
-                    "Creation already exists, gid({}), id({})",
-                    self.gid, self.id
-                ),
-            )
-            .into());
-        }
+        index.save(db).await?;
 
         let now = unix_ms() as i64;
         self.created_at = now;
@@ -318,8 +314,8 @@ impl Creation {
         let params = (
             status,
             new_updated_at,
-            self.gid.as_bytes(),
-            self.id.as_bytes(),
+            self.gid.to_cql(),
+            self.id.to_cql(),
             updated_at,
         );
 
@@ -399,11 +395,11 @@ impl Creation {
         let new_updated_at = unix_ms() as i64;
         let mut new_version = self.version;
         set_fields.push("updated_at=?".to_string());
-        params.push(CqlValue::BigInt(new_updated_at));
+        params.push(new_updated_at.to_cql());
         if cols.has("content") {
             set_fields.push("version=?".to_string());
             new_version += 1;
-            params.push(CqlValue::SmallInt(new_version));
+            params.push(new_version.to_cql());
         }
         for field in &update_fields {
             set_fields.push(format!("{}=?", field));
@@ -414,9 +410,9 @@ impl Creation {
             "UPDATE creation SET {} WHERE gid=? AND id=? IF updated_at=?",
             set_fields.join(",")
         );
-        params.push(CqlValue::Blob(self.gid.as_bytes().to_vec()));
-        params.push(CqlValue::Blob(self.id.as_bytes().to_vec()));
-        params.push(CqlValue::BigInt(updated_at));
+        params.push(self.gid.to_cql());
+        params.push(self.id.to_cql());
+        params.push(updated_at.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -473,7 +469,7 @@ impl Creation {
         );
 
         let delete_query = "DELETE FROM creation WHERE gid=? AND id=?";
-        let delete_params = (self.gid.as_bytes(), self.id.as_bytes());
+        let delete_params = (self.gid.to_cql(), self.id.to_cql());
 
         let _ = db
             .batch(
@@ -499,18 +495,13 @@ impl Creation {
                 let query = Query::new(format!(
                 "SELECT {} FROM creation WHERE gid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (gid.as_bytes(), id.as_bytes(), page_size as i32);
+                let params = (gid.to_cql(), id.to_cql(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             } else {
                 let query = Query::new(format!(
                     "SELECT {} FROM creation WHERE gid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (
-                    gid.as_bytes(),
-                    id.as_bytes(),
-                    status.unwrap(),
-                    page_size as i32,
-                );
+                let params = (gid.to_cql(), id.to_cql(), status.unwrap(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             }
         } else if status.is_none() {
@@ -519,14 +510,14 @@ impl Creation {
                 fields.clone().join(",")
             ))
             .with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), page_size as i32);
+            let params = (gid.to_cql(), page_size as i32);
             db.execute_iter(query, params).await? // TODO: execute_iter or execute_paged?
         } else {
             let query = Query::new(format!(
                 "SELECT {} FROM creation WHERE gid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
             )).with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), status.unwrap(), page_size as i32);
+            let params = (gid.to_cql(), status.unwrap(), page_size as i32);
             db.execute_iter(query, params).await?
         };
 
@@ -534,7 +525,7 @@ impl Creation {
         for row in rows {
             let mut doc = Creation::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
-            cols.fill(row, fields.clone())?;
+            cols.fill(row, &fields)?;
             doc.fill(&cols);
             doc._fields = fields.clone();
             res.push(doc);

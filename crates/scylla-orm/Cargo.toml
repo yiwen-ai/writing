@@ -14,8 +14,9 @@ license = "MIT OR Apache-2.0"
 scylla = { workspace = true }
 isolang = { workspace = true }
 xid = { workspace = true }
+uuid = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-ciborium = "0.2.1"
-serde = "1.0.164"
+ciborium = "0.2"
+serde = "1.0"

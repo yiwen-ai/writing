@@ -64,7 +64,7 @@ impl ColumnsMap {
         self.0.insert(map_name.to_string(), map.to_cql());
     }
 
-    pub fn fill(&mut self, row: Row, fields: Vec<String>) -> anyhow::Result<()> {
+    pub fn fill(&mut self, row: Row, fields: &Vec<String>) -> anyhow::Result<()> {
         if row.columns.len() != fields.len() {
             return Err(anyhow::Error::msg(format!(
                 "ColumnsMap::fill: row.columns.len({}) != fields.len({})",
@@ -192,12 +192,12 @@ mod tests {
                 Row {
                     columns: Vec::new(),
                 },
-                fields.clone()
+                &fields
             )
             .is_err());
         assert_ne!(map2, map);
 
-        assert!(map2.fill(row, fields).is_ok());
+        assert!(map2.fill(row, &fields).is_ok());
         assert_eq!(map2, map);
     }
 }

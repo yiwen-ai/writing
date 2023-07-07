@@ -129,11 +129,11 @@ impl PublicationDraft {
             "SELECT {} FROM publication_draft WHERE gid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let params = (self.gid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -147,11 +147,11 @@ impl PublicationDraft {
             "SELECT {} FROM deleted_publication_draft WHERE gid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.gid.as_bytes(), self.id.as_bytes());
+        let params = (self.gid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -227,8 +227,8 @@ impl PublicationDraft {
         let params = (
             status,
             new_updated_at,
-            self.gid.as_bytes(),
-            self.id.as_bytes(),
+            self.gid.to_cql(),
+            self.id.to_cql(),
             updated_at,
         );
 
@@ -301,7 +301,7 @@ impl PublicationDraft {
 
         let new_updated_at = unix_ms() as i64;
         set_fields.push("updated_at=?".to_string());
-        params.push(CqlValue::BigInt(new_updated_at));
+        params.push(new_updated_at.to_cql());
         for field in &update_fields {
             set_fields.push(format!("{}=?", field));
             params.push(cols.get(field).unwrap().to_owned());
@@ -311,9 +311,9 @@ impl PublicationDraft {
             "UPDATE publication_draft SET {} WHERE gid=? AND id=? IF updated_at=?",
             set_fields.join(",")
         );
-        params.push(CqlValue::Blob(self.gid.as_bytes().to_vec()));
-        params.push(CqlValue::Blob(self.id.as_bytes().to_vec()));
-        params.push(CqlValue::BigInt(updated_at));
+        params.push(self.gid.to_cql());
+        params.push(self.id.to_cql());
+        params.push(updated_at.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -372,7 +372,7 @@ impl PublicationDraft {
         );
 
         let delete_query = "DELETE FROM publication_draft WHERE gid=? AND id=?";
-        let delete_params = (self.gid.as_bytes(), self.id.as_bytes());
+        let delete_params = (self.gid.to_cql(), self.id.to_cql());
 
         let _ = db
             .batch(
@@ -398,18 +398,13 @@ impl PublicationDraft {
                 let query = Query::new(format!(
                 "SELECT {} FROM publication_draft WHERE gid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (gid.as_bytes(), id.as_bytes(), page_size as i32);
+                let params = (gid.to_cql(), id.to_cql(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             } else {
                 let query = Query::new(format!(
                     "SELECT {} FROM publication_draft WHERE gid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (
-                    gid.as_bytes(),
-                    id.as_bytes(),
-                    status.unwrap(),
-                    page_size as i32,
-                );
+                let params = (gid.to_cql(), id.to_cql(), status.unwrap(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             }
         } else if status.is_none() {
@@ -418,14 +413,14 @@ impl PublicationDraft {
                 fields.clone().join(",")
             ))
             .with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), page_size as i32);
+            let params = (gid.to_cql(), page_size as i32);
             db.execute_iter(query, params).await?
         } else {
             let query = Query::new(format!(
                 "SELECT {} FROM publication_draft WHERE gid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
             )).with_page_size(page_size as i32);
-            let params = (gid.as_bytes(), status.unwrap(), page_size as i32);
+            let params = (gid.to_cql(), status.unwrap(), page_size as i32);
             db.execute_iter(query, params).await?
         };
 
@@ -433,7 +428,7 @@ impl PublicationDraft {
         for row in rows {
             let mut doc = PublicationDraft::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
-            cols.fill(row, fields.clone())?;
+            cols.fill(row, &fields)?;
             doc.fill(&cols);
             doc._fields = fields.clone();
             res.push(doc);
@@ -585,19 +580,19 @@ impl Publication {
                 "SELECT {} FROM publication WHERE id=? AND language=? AND version=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql(), self.version);
+            let params = (self.id.to_cql(), self.language.to_cql(), self.version);
             db.execute(query, params).await?.single_row()?
         } else {
             let query = format!(
                 "SELECT {} FROM publication WHERE id=? AND language=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql());
+            let params = (self.id.to_cql(), self.language.to_cql());
             db.execute(query, params).await?.single_row()?
         };
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -612,19 +607,19 @@ impl Publication {
                 "SELECT {} FROM deleted_publication WHERE id=? AND language=? AND version=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql(), self.version);
+            let params = (self.id.to_cql(), self.language.to_cql(), self.version);
             db.execute(query, params).await?.single_row()?
         } else {
             let query = format!(
                 "SELECT {} FROM deleted_publication WHERE id=? AND language=? LIMIT 1",
                 fields.join(",")
             );
-            let params = (self.id.as_bytes(), self.language.to_cql());
+            let params = (self.id.to_cql(), self.language.to_cql());
             db.execute(query, params).await?.single_row()?
         };
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -660,7 +655,7 @@ impl Publication {
         let params = (
             status,
             new_updated_at,
-            self.id.as_bytes(),
+            self.id.to_cql(),
             self.language.to_cql(),
             self.version,
             updated_at,
@@ -721,7 +716,7 @@ impl Publication {
         );
 
         let delete_query = "DELETE FROM publication WHERE id=? AND language=? AND version=?";
-        let delete_params = (self.id.as_bytes(), self.language.to_cql(), self.version);
+        let delete_params = (self.id.to_cql(), self.language.to_cql(), self.version);
 
         let _ = db
             .batch(
@@ -787,15 +782,15 @@ impl Publication {
         let params = (
             publication.language.to_cql(),
             now,
-            creation_gid.as_bytes(),
-            publication.id.as_bytes(),
+            creation_gid.to_cql(),
+            publication.id.to_cql(),
         );
         let _ = db.execute(query, params).await?;
 
         // update draft status to 2: accepted.
         let query =
             "UPDATE publication_draft SET status=?,updated_at=? WHERE gid=? AND id=? IF EXISTS";
-        let params = (2i8, now, draft_gid.as_bytes(), draft_id.as_bytes());
+        let params = (2i8, now, draft_gid.to_cql(), draft_id.to_cql());
         let _ = db.execute(query, params).await?;
 
         Ok(publication)

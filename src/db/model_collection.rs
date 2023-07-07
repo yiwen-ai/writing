@@ -2,7 +2,7 @@ use isolang::Language;
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
-use scylla_orm::{ColumnsMap, CqlValue};
+use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
@@ -86,11 +86,11 @@ impl Collection {
             "SELECT {} FROM collection WHERE uid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.uid.as_bytes(), self.id.as_bytes());
+        let params = (self.uid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -104,11 +104,11 @@ impl Collection {
             "SELECT {} FROM deleted_collection WHERE uid=? AND id=? LIMIT 1",
             fields.join(",")
         );
-        let params = (self.uid.as_bytes(), self.id.as_bytes());
+        let params = (self.uid.to_cql(), self.id.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(fields.len());
-        cols.fill(res, fields)?;
+        cols.fill(res, &fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -179,8 +179,8 @@ impl Collection {
         let params = (
             status,
             new_updated_at,
-            self.uid.as_bytes(),
-            self.id.as_bytes(),
+            self.uid.to_cql(),
+            self.id.to_cql(),
             updated_at,
         );
 
@@ -247,7 +247,7 @@ impl Collection {
 
         let new_updated_at = unix_ms() as i64;
         set_fields.push("updated_at=?".to_string());
-        params.push(CqlValue::BigInt(new_updated_at));
+        params.push(new_updated_at.to_cql());
         for field in &update_fields {
             set_fields.push(format!("{}=?", field));
             params.push(cols.get(field).unwrap().to_owned());
@@ -257,9 +257,9 @@ impl Collection {
             "UPDATE collection SET {} WHERE uid=? AND id=? IF updated_at=?",
             set_fields.join(",")
         );
-        params.push(CqlValue::Blob(self.uid.as_bytes().to_vec()));
-        params.push(CqlValue::Blob(self.id.as_bytes().to_vec()));
-        params.push(CqlValue::BigInt(updated_at));
+        params.push(self.uid.to_cql());
+        params.push(self.id.to_cql());
+        params.push(updated_at.to_cql());
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
@@ -315,7 +315,7 @@ impl Collection {
         );
 
         let delete_query = "DELETE FROM collection WHERE uid=? AND id=?";
-        let delete_params = (self.uid.as_bytes(), self.id.as_bytes());
+        let delete_params = (self.uid.to_cql(), self.id.to_cql());
 
         let _ = db
             .batch(
@@ -341,18 +341,13 @@ impl Collection {
                 let query = Query::new(format!(
                 "SELECT {} FROM collection WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (uid.as_bytes(), id.as_bytes(), page_size as i32);
+                let params = (uid.to_cql(), id.to_cql(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             } else {
                 let query = Query::new(format!(
                     "SELECT {} FROM collection WHERE uid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","))).with_page_size(page_size as i32);
-                let params = (
-                    uid.as_bytes(),
-                    id.as_bytes(),
-                    status.unwrap(),
-                    page_size as i32,
-                );
+                let params = (uid.to_cql(), id.to_cql(), status.unwrap(), page_size as i32);
                 db.execute_paged(query, params, None).await?
             }
         } else if status.is_none() {
@@ -361,14 +356,14 @@ impl Collection {
                 fields.clone().join(",")
             ))
             .with_page_size(page_size as i32);
-            let params = (uid.as_bytes(), page_size as i32);
+            let params = (uid.to_cql(), page_size as i32);
             db.execute_iter(query, params).await? // TODO: execute_iter or execute_paged?
         } else {
             let query = Query::new(format!(
                 "SELECT {} FROM collection WHERE uid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
             )).with_page_size(page_size as i32);
-            let params = (uid.as_bytes(), status.unwrap(), page_size as i32);
+            let params = (uid.to_cql(), status.unwrap(), page_size as i32);
             db.execute_iter(query, params).await?
         };
 
@@ -376,7 +371,7 @@ impl Collection {
         for row in rows {
             let mut doc = Collection::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
-            cols.fill(row, fields.clone())?;
+            cols.fill(row, &fields)?;
             doc.fill(&cols);
             doc._fields = fields.clone();
             res.push(doc);
