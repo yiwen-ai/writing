@@ -121,6 +121,7 @@ pub struct Creation {
     pub summary: String,
     pub content: Vec<u8>,
     pub license: String,
+
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
 
