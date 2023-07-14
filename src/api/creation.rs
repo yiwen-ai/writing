@@ -10,11 +10,13 @@ use validator::Validate;
 use crate::db;
 
 use axum_web::context::ReqContext;
-use axum_web::erring::{HTTPError, SuccessResponse};
+use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{AppState, Pagination, QueryIdGid, QueryIdGidVersion, UpdateStatusInput};
+use super::{
+    get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryGidId, UpdateStatusInput,
+};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateCreationInput {
@@ -58,8 +60,6 @@ pub struct CreationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_languages: Option<Vec<PackObject<Language>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub original_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<Vec<String>>,
@@ -96,15 +96,11 @@ impl CreationOutput {
         for v in val._fields {
             match v.as_str() {
                 "status" => rt.status = Some(val.status),
-                "rating" => rt.rating = Some(val.rating),
                 "version" => rt.version = Some(val.version),
                 "language" => rt.language = Some(to.with(val.language)),
                 "creator" => rt.creator = Some(to.with(val.creator)),
                 "created_at" => rt.created_at = Some(val.created_at),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
-                "active_languages" => {
-                    rt.active_languages = Some(to.with_set(val.active_languages.to_owned()))
-                }
                 "original_url" => rt.original_url = Some(val.original_url.to_owned()),
                 "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
@@ -115,7 +111,7 @@ impl CreationOutput {
                 "authors" => rt.authors = Some(val.authors.to_owned()),
                 "reviewers" => rt.reviewers = Some(to.with_vec(val.reviewers.to_owned())),
                 "summary" => rt.summary = Some(val.summary.to_owned()),
-                "content" => rt.content = Some(to.with(val.content.to_owned())),
+                "content" => rt.content = Some(to.with(val._content.to_owned())),
                 "license" => rt.license = Some(val.license.to_owned()),
                 _ => {}
             }
@@ -132,6 +128,7 @@ pub async fn create(
 ) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let mut doc = db::Creation {
         gid: input.gid.unwrap(),
@@ -147,7 +144,6 @@ pub async fn create(
         labels: input.labels.unwrap_or_default(),
         authors: input.authors.unwrap_or_default(),
         summary: input.summary.unwrap_or_default(),
-        content: input.content.unwrap(),
         license: input.license.unwrap_or_default(),
         ..Default::default()
     };
@@ -158,7 +154,7 @@ pub async fn create(
     ])
     .await;
 
-    let ok = doc.save(&app.scylla).await?;
+    let ok = doc.save_with(&app.scylla, input.content.unwrap()).await?;
     ctx.set("created", ok.into()).await;
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
@@ -167,17 +163,13 @@ pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdGid>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let gid = input
-        .gid
-        .as_ref()
-        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
-
+    let gid = *input.gid.to_owned();
     let id = *input.id.to_owned();
-    let gid = *gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_creation".into()),
@@ -187,14 +179,8 @@ pub async fn get(
     .await;
 
     let mut doc = db::Creation::with_pk(gid, id);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -205,13 +191,10 @@ pub async fn list(
 ) -> Result<PackObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let gid = input
-        .gid
-        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
-
+    let gid = input.gid.unwrap();
     let page_size = input.page_size.unwrap_or(10);
-    let gid = *gid.to_owned();
     ctx.set_kvs(vec![
         ("action", "list_creation".into()),
         ("gid", gid.to_string().into()),
@@ -219,18 +202,17 @@ pub async fn list(
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| s.unwrap());
-    let res = db::Creation::find(
+    let res = db::Creation::list_by_gid(
         &app.scylla,
         gid,
         fields,
         page_size,
-        page_token,
+        token_to_xid(&input.page_token),
         input.status,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
-        Some(res.last().unwrap().id.to_string())
+        to.with_option(token_from_xid(res.last().unwrap().id))
     } else {
         None
     };
@@ -293,9 +275,6 @@ impl UpdateCreationInput {
         if let Some(summary) = self.summary {
             cols.set_as("summary", &summary);
         }
-        if let Some(content) = self.content {
-            cols.set_as("content", &content.unwrap());
-        }
         if let Some(license) = self.license {
             cols.set_as("license", &license);
         }
@@ -315,9 +294,11 @@ pub async fn update(
 ) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
     let gid = *input.gid.to_owned();
+
     let mut doc = db::Creation::with_pk(gid, id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
@@ -328,14 +309,54 @@ pub async fn update(
     ])
     .await;
 
-    let update_content = cols.has("content");
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
-    if update_content {
-        doc._fields.push("version".to_string());
-    }
+    Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateCreationContentInput {
+    pub gid: PackObject<xid::Id>,
+    pub id: PackObject<xid::Id>,
+    pub language: PackObject<Language>,
+    pub content: PackObject<Vec<u8>>,
+    pub updated_at: i64,
+}
+
+pub async fn update_content(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<UpdateCreationContentInput>,
+) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let id = input.id.unwrap();
+    let gid = input.gid.unwrap();
+    let language = input.language.unwrap();
+    let content = input.content.unwrap();
+
+    let mut doc = db::Creation::with_pk(gid, id);
+    ctx.set_kvs(vec![
+        ("action", "update_content".into()),
+        ("gid", doc.gid.to_string().into()),
+        ("id", doc.id.to_string().into()),
+    ])
+    .await;
+
+    let ok = doc
+        .update_content(&app.scylla, language, content, input.updated_at)
+        .await?;
+
+    ctx.set("updated", ok.into()).await;
+    doc._fields = vec![
+        "updated_at".to_string(),
+        "language".to_string(),
+        "version".to_string(),
+    ];
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -346,13 +367,14 @@ pub async fn update_status(
 ) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let gid = input
         .gid
         .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
-
-    let id = *input.id.to_owned();
     let gid = *gid.to_owned();
+    let id = *input.id.to_owned();
+
     let mut doc = db::Creation::with_pk(gid, id);
     ctx.set_kvs(vec![
         ("action", "update_status".into()),
@@ -374,17 +396,13 @@ pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdGidVersion>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let gid = input
-        .gid
-        .as_ref()
-        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
-
+    let gid = *input.gid.to_owned();
     let id = *input.id.to_owned();
-    let gid = *gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_creation".into()),
@@ -394,6 +412,6 @@ pub async fn delete(
     .await;
 
     let mut doc = db::Creation::with_pk(gid, id);
-    let res = doc.delete(&app.scylla, input.version).await?;
+    let res = doc.delete(&app.scylla).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }

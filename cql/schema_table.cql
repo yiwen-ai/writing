@@ -9,17 +9,33 @@ CREATE TABLE IF NOT EXISTS creation_index (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
+-- this table should be replaced by ytsaurus
+CREATE TABLE IF NOT EXISTS content (
+    id         BLOB,     -- content id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    gid        BLOB,     -- group id, creation belong to
+    cid        BLOB,     -- creation id, 12 bytes XID
+    status     TINYINT,  -- int8, -1: Deleted, 0: Normal
+    version    SMALLINT, -- creation version
+    language   TEXT,     -- creation's language, ISO 639-3
+    updated_at BIGINT,   -- update at
+    hash       BLOB,     -- SHA3 256
+    content    BLOB,     -- content in CBOR format
+    PRIMARY KEY (id)
+) WITH caching = {'enabled': 'true'}
+    AND comment = 'creations'
+    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 0;
+
 CREATE TABLE IF NOT EXISTS creation (
     gid              BLOB,        -- group id, creation belong to
-    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    id               BLOB,        -- creation id, 12 bytes XID
     status           TINYINT,     -- int8, -1: Archived, 0: Draft, 1: Review, 2: Approved
-    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     version          SMALLINT,    -- creation version
     language         TEXT,        -- creation's language, ISO 639-3
     creator          BLOB,        -- user id who create the creation.
     created_at       BIGINT,      -- create at, unix time, ms
     updated_at       BIGINT,      -- update at
-    active_languages SET<TEXT>,   -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
     genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
@@ -30,7 +46,7 @@ CREATE TABLE IF NOT EXISTS creation (
     authors          LIST<TEXT>,  -- authors
     reviewers        LIST<BLOB>,  -- reviewers
     summary          TEXT,        -- summary
-    content          BLOB,        -- content in CBOR format
+    content          BLOB,        -- content id, xid
     license          TEXT,        -- license url
     PRIMARY KEY (gid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
@@ -43,10 +59,11 @@ CREATE TABLE IF NOT EXISTS creation (
 CREATE INDEX creation_gid_status ON creation ((gid), status);
 
 CREATE TABLE IF NOT EXISTS publication (
-    id           BLOB,       -- creation id
+    gid          BLOB,       -- group id, publication belong to
+    cid          BLOB,       -- creation id
     language     TEXT,       -- publication's language, ISO 639-3
     version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
+    status       TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
     updated_at   BIGINT,     -- update at
@@ -59,46 +76,18 @@ CREATE TABLE IF NOT EXISTS publication (
     keywords     LIST<TEXT>, -- keywords
     authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
-    content      BLOB,       -- content in CBOR format.
+    content      BLOB,       -- content id, xid
     license      TEXT,       -- license url
-    PRIMARY KEY (id, language, version)
-) WITH CLUSTERING ORDER BY (language ASC, version DESC)
+    PRIMARY KEY (gid, cid, language, version)
+) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'true'}
     AND comment = 'publications'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE TABLE IF NOT EXISTS publication_draft (
-    gid          BLOB,       -- group id, publication draft belong to
-    id           BLOB,       -- draft id
-    cid          BLOB,       -- creation id
-    language     TEXT,       -- draft's language, ISO 639-3
-    version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
-    creator      BLOB,       -- user id who create the publication.
-    created_at   BIGINT,     -- create at
-    updated_at   BIGINT,     -- update at
-    model        TEXT,       -- AI model name, default to empty
-    original_url TEXT,       -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,       -- title
-    description  TEXT,       -- description
-    cover        TEXT,       -- cover url
-    keywords     LIST<TEXT>, -- keywords
-    authors      LIST<TEXT>, -- authors
-    summary      TEXT,       -- summary
-    content      BLOB,       -- content in CBOR format.
-    license      TEXT,       -- license url
-    PRIMARY KEY (gid, id)
-) WITH CLUSTERING ORDER BY (id DESC)
-    AND caching = {'enabled': 'false'}
-    AND comment = 'publications'
-    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 0;
-
-CREATE INDEX publication_draft_gid_status ON publication_draft ((gid), status);
+CREATE INDEX publication_cid ON publication (cid);
+CREATE INDEX publication_gid_status ON publication ((gid), status);
 
 CREATE TABLE IF NOT EXISTS comment (
     cid         BLOB,    -- creation id comment to, 12 bytes XID
@@ -109,7 +98,7 @@ CREATE TABLE IF NOT EXISTS comment (
     created_at  BIGINT,  -- create at, unix time with second precision.
     updated_at  BIGINT,  -- update at, can't update after approved.
     approved_at BIGINT,  -- approved at.
-    content     BLOB,    -- comment content in CBOR format.
+    content     BLOB,    -- content id, xid. TODO with ytsaurus
     reply       BLOB,    -- optional, comment id reply to
     PRIMARY KEY (cid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
@@ -147,13 +136,12 @@ CREATE INDEX collection_uid_status ON collection ((uid), status);
 
 CREATE TABLE IF NOT EXISTS deleted_creation (
     gid              BLOB,        -- group id, creation belong to
-    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    id               BLOB,        -- creation id, 12 bytes XID
     status           TINYINT,     -- int8, -1: Archived, 0: Draft, 1: Review, 2: Approved
-    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
     version          SMALLINT,    -- creation version
     language         TEXT,        -- creation's language, ISO 639-3
     creator          BLOB,        -- user id who create the creation.
-    created_at       BIGINT,      -- create at
+    created_at       BIGINT,      -- create at, unix time, ms
     updated_at       BIGINT,      -- update at
     active_languages SET<TEXT>,   -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
@@ -166,7 +154,7 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     authors          LIST<TEXT>,  -- authors
     reviewers        LIST<BLOB>,  -- reviewers
     summary          TEXT,        -- summary
-    content          BLOB,        -- content in CBOR format
+    content          BLOB,        -- content id, xid
     license          TEXT,        -- license url
     PRIMARY KEY (gid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
@@ -177,10 +165,11 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     AND default_time_to_live = 17280000; -- 60*60*24*200, 17280000, 200 days，安全要求应该大于半年
 
 CREATE TABLE IF NOT EXISTS deleted_publication (
-    id           BLOB,       -- creation id
+    gid          BLOB,       -- group id, publication belong to
+    cid          BLOB,       -- creation id
     language     TEXT,       -- publication's language, ISO 639-3
     version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Archived, 0: Normal, 1: Approved, 2: Published
+    status       TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
     creator      BLOB,       -- user id who create the publication.
     created_at   BIGINT,     -- create at
     updated_at   BIGINT,     -- update at
@@ -193,39 +182,10 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
     keywords     LIST<TEXT>, -- keywords
     authors      LIST<TEXT>, -- authors
     summary      TEXT,       -- summary
-    content      BLOB,       -- content in CBOR format.
+    content      BLOB,       -- content id, xid
     license      TEXT,       -- license url
-    PRIMARY KEY (id, language, version)
-) WITH CLUSTERING ORDER BY (language ASC, version DESC)
-    AND caching = {'enabled': 'false'}
-    AND comment = 'publications'
-    AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 17280000;
-
-CREATE TABLE IF NOT EXISTS deleted_publication_draft (
-    gid          BLOB,       -- group id, publication draft belong to
-    id           BLOB,       -- draft id
-    cid          BLOB,       -- creation id
-    language     TEXT,       -- draft's language, ISO 639-3
-    version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Rejected, 0: Draft, 1: Review, 2: Accepted
-    creator      BLOB,       -- user id who create the publication.
-    created_at   BIGINT,     -- create at
-    updated_at   BIGINT,     -- update at
-    model        TEXT,       -- AI model name, default to empty
-    original_url TEXT,       -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,       -- title
-    description  TEXT,       -- description
-    cover        TEXT,       -- cover url
-    keywords     LIST<TEXT>, -- keywords
-    authors      LIST<TEXT>, -- authors
-    summary      TEXT,       -- summary
-    content      BLOB,       -- content in CBOR format.
-    license      TEXT,       -- license url
-    PRIMARY KEY (gid, id)
-) WITH CLUSTERING ORDER BY (id DESC)
+    PRIMARY KEY (gid, cid, language, version)
+) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'false'}
     AND comment = 'publications'
     AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
@@ -241,7 +201,7 @@ CREATE TABLE IF NOT EXISTS deleted_comment (
     created_at  BIGINT,  -- create at, unix time with second precision.
     updated_at  BIGINT,  -- update at, can't update after approved.
     approved_at BIGINT,  -- approved at.
-    content     BLOB,    -- comment content in CBOR format.
+    content     BLOB,    -- content id, xid. TODO with ytsaurus
     reply       BLOB,    -- optional, comment id reply to
     PRIMARY KEY (cid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)

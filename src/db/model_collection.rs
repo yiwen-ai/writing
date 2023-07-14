@@ -67,7 +67,7 @@ impl Collection {
     }
 
     pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
-        if !(-1..=2).contains(&status) {
+        if !(-1..=2).contains(&status) || !(-1..=2).contains(&self.status) {
             return Err(HTTPError::new(400, format!("Invalid status, {}", status)).into());
         }
 
@@ -141,7 +141,7 @@ impl Collection {
         if !extract_applied(res) {
             return Err(HTTPError::new(
                 409,
-                format!("Collection {} save failed, please try again", self.id),
+                "Collection save failed, please try again".to_string(),
             )
             .into());
         }
@@ -265,7 +265,7 @@ impl Collection {
         if !extract_applied(res) {
             return Err(HTTPError::new(
                 409,
-                format!("Creation {} update failed, please try again", self.id),
+                "Creation update failed, please try again".to_string(),
             )
             .into());
         }
@@ -274,26 +274,24 @@ impl Collection {
         Ok(true)
     }
 
-    pub async fn delete(&mut self, db: &scylladb::ScyllaDB, version: i16) -> anyhow::Result<bool> {
-        let res = self.get_one(db, vec!["version".to_string()]).await;
+    pub async fn delete(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+        let res = self.get_one(db, Vec::new()).await;
         if res.is_err() {
             return Ok(false); // already deleted
         }
 
-        if self.version != version {
+        if self.status != -1 {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Collection version conflict, expected version {}, got {}",
-                    self.version, version
+                    "Collection delete conflict, expected status -1, got {}",
+                    self.status
                 ),
             )
             .into());
         }
 
-        self.get_one(db, Vec::new()).await?;
         self.updated_at = unix_ms() as i64;
-
         let fields = Self::fields();
         self._fields = fields.iter().map(|f| f.to_string()).collect();
 
@@ -406,15 +404,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
-        collection_model_works().await?;
-        collection_find_works().await?;
-
-        Ok(())
+    async fn test_all() {
+        collection_model_works().await;
+        collection_find_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn collection_model_works() -> anyhow::Result<()> {
+    async fn collection_model_works() {
         let db = get_db().await;
         let uid = xid::Id::from_str(db::USER_JARVIS).unwrap();
         let id = xid::new();
@@ -468,14 +464,14 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save(db).await?);
+            assert!(doc.save(db).await.unwrap());
             let res = doc.save(db).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
             assert_eq!(err.code, 409);
 
             let mut doc2 = Collection::with_pk(uid, id);
-            doc2.get_one(db, vec![]).await?;
+            doc2.get_one(db, vec![]).await.unwrap();
 
             assert_eq!(doc2.cid, cid);
             assert_eq!(doc2.title.as_str(), "Hello World");
@@ -484,7 +480,8 @@ mod tests {
 
             let mut doc3 = Collection::with_pk(uid, id);
             doc3.get_one(db, vec!["cid".to_string(), "version".to_string()])
-                .await?;
+                .await
+                .unwrap();
             assert_eq!(doc3.cid, cid);
             assert_eq!(doc3.title.as_str(), "");
             assert_eq!(doc3.version, 1);
@@ -510,7 +507,7 @@ mod tests {
 
             let mut cols = ColumnsMap::new();
             cols.set_as("title", &"title 1".to_string());
-            let res = doc.update(db, cols, doc.updated_at).await?;
+            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
             assert!(res);
 
             let mut cols = ColumnsMap::new();
@@ -521,32 +518,32 @@ mod tests {
             cols.set_as("summary", &"summary 2".to_string());
             cols.set_as("labels", &vec!["label 1".to_string()]);
 
-            let res = doc.update(db, cols, doc.updated_at).await?;
+            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
             assert!(res);
         }
 
         // update status
         {
             let mut doc = Collection::with_pk(uid, id);
-            doc.get_one(db, vec![]).await?;
+            doc.get_one(db, vec![]).await.unwrap();
 
             let res = doc.update_status(db, 2, doc.updated_at - 1).await;
             assert!(res.is_err());
 
-            let res = doc.update_status(db, 2, doc.updated_at).await?;
+            let res = doc.update_status(db, 2, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            let res = doc.update_status(db, 1, doc.updated_at).await.unwrap();
             assert!(res);
 
-            let res = doc.update_status(db, 1, doc.updated_at).await?;
+            let res = doc.update_status(db, 1, doc.updated_at).await.unwrap();
             assert!(!res);
         }
 
         // delete
         {
             let mut backup = Collection::with_pk(uid, id);
-            backup.get_one(db, vec![]).await?;
+            backup.get_one(db, vec![]).await.unwrap();
             backup.updated_at = 0;
 
             let mut deleted = Collection::with_pk(uid, id);
@@ -556,27 +553,27 @@ mod tests {
             assert_eq!(err.code, 404);
 
             let mut doc = Collection::with_pk(uid, id);
-            let res = doc.delete(db, 0).await;
+            let res = doc.delete(db).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409);
 
-            let res = doc.delete(db, 2).await?;
+            doc.update_status(db, -1, doc.updated_at).await.unwrap();
+            let res = doc.delete(db).await.unwrap();
             assert!(res);
 
-            let res = doc.delete(db, 2).await?;
+            let res = doc.delete(db).await.unwrap();
             assert!(!res); // already deleted
 
-            deleted.get_deleted(db).await?;
+            deleted.get_deleted(db).await.unwrap();
             deleted.updated_at = 0;
+            backup.status = -1;
             assert_eq!(deleted, backup);
         }
-
-        Ok(())
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn collection_find_works() -> anyhow::Result<()> {
+    async fn collection_find_works() {
         let db = get_db().await;
         let uid = xid::new();
 
@@ -587,27 +584,38 @@ mod tests {
             doc.language = Language::Eng;
             doc.version = 1;
             doc.title = format!("Hello World {}", i);
-            doc.save(db).await?;
+            doc.save(db).await.unwrap();
 
             docs.push(doc)
         }
         assert_eq!(docs.len(), 10);
 
-        let latest = Collection::find(db, uid, Vec::new(), 1, None, None).await?;
+        let latest = Collection::find(db, uid, Vec::new(), 1, None, None)
+            .await
+            .unwrap();
         assert_eq!(latest.len(), 1);
         let mut latest = latest[0].to_owned();
         assert_eq!(latest.uid, docs.last().unwrap().uid);
         assert_eq!(latest.id, docs.last().unwrap().id);
 
-        latest.update_status(db, 1, latest.updated_at).await?;
-        let res = Collection::find(db, uid, vec!["title".to_string()], 100, None, None).await?;
+        latest
+            .update_status(db, 1, latest.updated_at)
+            .await
+            .unwrap();
+        let res = Collection::find(db, uid, vec!["title".to_string()], 100, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 10);
 
-        let res = Collection::find(db, uid, vec!["title".to_string()], 100, None, Some(1)).await?;
+        let res = Collection::find(db, uid, vec!["title".to_string()], 100, None, Some(1))
+            .await
+            .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].id, docs.last().unwrap().id);
 
-        let res = Collection::find(db, uid, vec!["title".to_string()], 5, None, None).await?;
+        let res = Collection::find(db, uid, vec!["title".to_string()], 5, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].id, docs[5].id);
 
@@ -619,7 +627,8 @@ mod tests {
             Some(docs[5].id),
             None,
         )
-        .await?;
+        .await
+        .unwrap();
         assert_eq!(res.len(), 5);
         assert_eq!(res[4].id, docs[0].id);
 
@@ -631,9 +640,8 @@ mod tests {
             Some(docs[5].id),
             Some(1),
         )
-        .await?;
+        .await
+        .unwrap();
         assert_eq!(res.len(), 0);
-
-        Ok(())
     }
 }

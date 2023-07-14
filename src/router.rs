@@ -58,27 +58,14 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     "/update_status",
                     routing::patch(api::creation::update_status),
                 )
-                .route("/patch_content", routing::patch(todo)), // patch content
+                .route(
+                    "/update_content",
+                    routing::put(api::creation::update_content).patch(todo),
+                ), // patch content
         )
         .nest(
             "/v1/publication",
             Router::new()
-                .nest(
-                    "/draft",
-                    Router::new()
-                        .route(
-                            "/",
-                            routing::post(api::publication_draft::create)
-                                .get(api::publication_draft::get)
-                                .patch(api::publication_draft::update)
-                                .delete(api::publication_draft::delete),
-                        )
-                        .route("/list", routing::post(api::publication_draft::list))
-                        .route(
-                            "/update_status",
-                            routing::patch(api::publication_draft::update_status),
-                        ),
-                )
                 .nest(
                     "/comment",
                     Router::new()
@@ -89,13 +76,22 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     "/",
                     routing::post(api::publication::create)
                         .get(api::publication::get)
+                        .patch(api::publication::update)
                         .delete(api::publication::delete),
                 )
-                .route("/batch_get", routing::post(api::publication::batch_get))
+                .route("/list", routing::post(api::publication::list))
+                .route(
+                    "/list_published",
+                    routing::get(api::publication::list_published),
+                )
                 .route(
                     "/update_status",
                     routing::patch(api::publication::update_status),
-                ),
+                )
+                .route(
+                    "/update_content",
+                    routing::put(api::publication::update_content).patch(todo),
+                ), // patch content
         )
         .nest(
             "/v1/collection",
@@ -154,15 +150,16 @@ mod tests {
         SERVER
             .get_or_init(|| async {
                 let cfg = conf::Conf::new().unwrap_or_else(|err| panic!("config error: {}", err));
-                let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
                 let addr = listener.local_addr().unwrap();
                 let (_, app) = new(cfg).await.unwrap();
 
                 tokio::spawn(async move {
-                    let _ = axum::Server::from_tcp(listener)
+                    let res = axum::Server::from_tcp(listener)
                         .unwrap()
                         .serve(app.into_make_service())
                         .await;
+                    println!("server error: {:?}", res);
                 });
 
                 time::sleep(time::Duration::from_millis(100)).await;
@@ -181,56 +178,56 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[ignore]
-    async fn test_all() -> anyhow::Result<()> {
+    async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
-        healthz_api_works().await?;
-        api_works_with_json_and_cbor().await?;
-
-        Ok(())
+        healthz_api_works().await;
+        api_works_with_json_and_cbor().await;
     }
 
-    async fn healthz_api_works() -> anyhow::Result<()> {
+    async fn healthz_api_works() {
         let (addr, client) = get_server().await;
+        println!("addr: {:?}", addr);
+
+        // time::sleep(time::Duration::from_secs(100)).await;
 
         let res = client
             .get(format!("http://{}/healthz", addr))
             .header(
-                http::header::CONTENT_TYPE,
+                http::header::ACCEPT,
                 HeaderValue::from_static("application/json"),
             )
             .send()
-            .await?;
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(
             res.headers().get("content-type").unwrap(),
             "application/json"
         );
-        let body = res.bytes().await?;
+        let body = res.bytes().await.unwrap();
         let json_obj: api::AppInfo = serde_json::from_slice(&body).unwrap();
 
         let res = client
             .get(format!("http://{}/healthz", addr))
             .header(
-                http::header::CONTENT_TYPE,
+                http::header::ACCEPT,
                 HeaderValue::from_static("application/cbor"),
             )
             .send()
-            .await?;
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(
             res.headers().get("content-type").unwrap(),
             "application/cbor"
         );
-        let body = res.bytes().await?;
+        let body = res.bytes().await.unwrap();
         let cbor_obj: api::AppInfo = ciborium::from_reader(&body[..]).unwrap();
 
         assert_eq!(json_obj.start_at, cbor_obj.start_at);
-
-        Ok(())
     }
 
-    async fn api_works_with_json_and_cbor() -> anyhow::Result<()> {
+    async fn api_works_with_json_and_cbor() {
         let (addr, client) = get_server().await;
 
         let content = encode_cbor(
@@ -249,7 +246,8 @@ mod tests {
                 }],
             })
             .unwrap(),
-        )?;
+        )
+        .unwrap();
 
         let content_base64 = "omR0eXBlY2RvY2djb250ZW50gaNkdHlwZWdoZWFkaW5nZWF0dHJzomJpZGZZM1QxSWtlbGV2ZWwBZ2NvbnRlbnSBomR0eXBlZHRleHRkdGV4dGtIZWxsbyBXb3JsZA";
         assert_eq!(
@@ -263,10 +261,7 @@ mod tests {
                 http::header::CONTENT_TYPE,
                 HeaderValue::from_static("application/json"),
             )
-            .header(
-                HeaderName::from_static("x-user-id"),
-                HeaderValue::from_static("jarvis00000000000000"),
-            )
+            .header("x-auth-user", db::USER_JARVIS)
             .json(&json!({
                 "gid": "jarvis00000000000000",
                 "language": "en",
@@ -274,16 +269,17 @@ mod tests {
                 "content": content_base64
             }))
             .send()
-            .await?;
+            .await
+            .unwrap();
         if res.status() != StatusCode::OK {
-            panic!("response: {:?}", res.text().await?);
+            panic!("response: {:?}", res.text().await.unwrap());
         }
 
         assert_eq!(
             res.headers().get("content-type").unwrap(),
             "application/json"
         );
-        let body = res.bytes().await?;
+        let body = res.bytes().await.unwrap();
         let json_obj: erring::SuccessResponse<api::creation::CreationOutput> =
             serde_json::from_slice(&body).unwrap();
         let json_obj = json_obj.result;
@@ -297,7 +293,7 @@ mod tests {
                 "content" => ciborium::Value::Bytes(content),
             })
             .unwrap(),
-        )?;
+        ).unwrap();
 
         let res = client
             .post(format!("http://{}/v1/creation", addr))
@@ -305,22 +301,20 @@ mod tests {
                 http::header::CONTENT_TYPE,
                 HeaderValue::from_static("application/cbor"),
             )
-            .header(
-                HeaderName::from_static("x-user-id"),
-                HeaderValue::from_static("jarvis00000000000000"),
-            )
+            .header("x-auth-user", db::USER_JARVIS)
             .body(req_body)
             .send()
-            .await?;
+            .await
+            .unwrap();
         if res.status() != StatusCode::OK {
-            panic!("response: {:?}", res.text().await?);
+            panic!("response: {:?}", res.text().await.unwrap());
         }
 
         assert_eq!(
             res.headers().get("content-type").unwrap(),
             "application/cbor"
         );
-        let body = res.bytes().await?;
+        let body = res.bytes().await.unwrap();
         let cbor_obj: erring::SuccessResponse<api::creation::CreationOutput> =
             ciborium::from_reader(&body[..]).unwrap();
         let cbor_obj = cbor_obj.result;
@@ -336,7 +330,5 @@ mod tests {
             json_obj.content.unwrap().unwrap(),
             cbor_obj.content.unwrap().unwrap()
         );
-
-        Ok(())
     }
 }

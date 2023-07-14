@@ -442,6 +442,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "faster-hex"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9042d281a5eec0f2387f8c3ea6c4514e2cf2732c90a85aaf383b761ee3b290d"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "flate2"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -895,6 +904,15 @@ dependencies = [
  "pest",
  "pest_derive",
  "serde",
+]
+
+[[package]]
+name = "keccak"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f6d5ed8676d904364de097082f4e7d240b571b67989ced0240f08b7f966f940"
+dependencies = [
+ "cpufeatures",
 ]
 
 [[package]]
@@ -1743,6 +1761,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "sha3"
+version = "0.10.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
+dependencies = [
+ "digest",
+ "keccak",
 ]
 
 [[package]]
@@ -2634,7 +2662,7 @@ dependencies = [
 
 [[package]]
 name = "writing"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2645,6 +2673,7 @@ dependencies = [
  "ciborium",
  "ciborium-io",
  "config",
+ "faster-hex",
  "futures",
  "hyper",
  "isolang",
@@ -2658,6 +2687,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "sha3",
  "structured-logger",
  "tokio",
  "tower",
@@ -2671,7 +2701,7 @@ dependencies = [
 [[package]]
 name = "xid"
 version = "1.0.3"
-source = "git+https://github.com/yiwen-ai/xid-rs.git?branch=main#2cfbb0fc244c813ef3d41d9e96c2b8228aec7825"
+source = "git+https://github.com/yiwen-ai/xid-rs.git?tag=v1.1.0#8e96fc334a6d29d6883e8ef3bc395a4b89dc8364"
 dependencies = [
  "crc32fast",
  "hostname",

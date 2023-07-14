@@ -1,5 +1,4 @@
 use scylla::frame::response::result::Row;
-
 use std::collections::{hash_map::Iter, HashMap};
 
 use crate::{CqlValue, FromCqlVal, ToCqlVal};

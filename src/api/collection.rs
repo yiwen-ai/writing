@@ -10,11 +10,13 @@ use validator::Validate;
 use crate::db;
 
 use axum_web::context::ReqContext;
-use axum_web::erring::{HTTPError, SuccessResponse};
+use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{AppState, Pagination, QueryIdGid, QueryIdGidVersion, UpdateStatusInput};
+use super::{
+    get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryId, UpdateStatusInput,
+};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateCollectionInput {
@@ -98,6 +100,7 @@ pub async fn create(
 ) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let mut doc = db::Collection {
         uid: ctx.user,
@@ -131,9 +134,10 @@ pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdGid>,
+    input: Query<QueryId>,
 ) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
 
@@ -144,14 +148,8 @@ pub async fn get(
     .await;
 
     let mut doc = db::Collection::with_pk(ctx.user, id);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
 }
 
@@ -162,24 +160,27 @@ pub async fn list(
 ) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let page_size = input.page_size.unwrap_or(10);
-    ctx.set_kvs(vec![("action", "list_collection".into())])
-        .await;
+    ctx.set_kvs(vec![
+        ("action", "list_collection".into()),
+        ("page_size", page_size.into()),
+    ])
+    .await;
 
     let fields = input.fields.unwrap_or_default();
-    let page_token = input.page_token.map(|s| s.unwrap());
     let res = db::Collection::find(
         &app.scylla,
         ctx.user,
         fields,
         page_size,
-        page_token,
+        token_to_xid(&input.page_token),
         input.status,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
-        Some(res.last().unwrap().id.to_string())
+        to.with_option(token_from_xid(res.last().unwrap().id))
     } else {
         None
     };
@@ -249,6 +250,7 @@ pub async fn update(
 ) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
     let mut doc = db::Collection::with_pk(ctx.user, id);
@@ -273,6 +275,7 @@ pub async fn update_status(
 ) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     let gid = input
         .gid
@@ -300,26 +303,20 @@ pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdGidVersion>,
+    input: Query<QueryId>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
-
-    let gid = input
-        .gid
-        .as_ref()
-        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
+    valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
-    let gid = *gid.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "delete_creation".into()),
-        ("gid", gid.to_string().into()),
+        ("action", "delete_collection".into()),
         ("id", id.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::Collection::with_pk(gid, id);
-    let res = doc.delete(&app.scylla, input.version).await?;
+    let mut doc = db::Collection::with_pk(ctx.user, id);
+    let res = doc.delete(&app.scylla).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }

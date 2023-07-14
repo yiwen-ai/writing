@@ -4,26 +4,21 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use validator::Validate;
 
-use crate::db;
 use axum_web::context::ReqContext;
-use axum_web::erring::{HTTPError, SuccessResponse};
+use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
+use scylla_orm::ColumnsMap;
 
-use super::{AppState, QueryIdLanguageVersion, UpdatePublicationStatusInput};
-
-#[derive(Debug, Deserialize, Serialize, Validate)]
-pub struct CreatePublicationInput {
-    pub gid: PackObject<xid::Id>,
-    pub id: PackObject<xid::Id>,
-    pub cid: PackObject<xid::Id>,
-}
+use crate::api::{get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryGidCid};
+use crate::db;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PublicationOutput {
-    pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
     pub version: i16,
     pub rating: i8,
@@ -57,14 +52,13 @@ pub struct PublicationOutput {
     pub content: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_languages: Option<Vec<PackObject<Language>>>,
 }
 
 impl PublicationOutput {
     fn from<T>(val: db::Publication, to: &PackObject<T>) -> Self {
         let mut rt = Self {
-            id: to.with(val.id),
+            gid: to.with(val.gid),
+            cid: to.with(val.cid),
             language: to.with(val.language),
             version: val.version,
             rating: val._rating,
@@ -86,18 +80,43 @@ impl PublicationOutput {
                 "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "authors" => rt.authors = Some(val.authors.to_owned()),
                 "summary" => rt.summary = Some(val.summary.to_owned()),
-                "content" => rt.content = Some(to.with(val.content.to_owned())),
+                "content" => rt.content = Some(to.with(val._content.to_owned())),
                 "license" => rt.license = Some(val.license.to_owned()),
                 _ => {}
             }
         }
 
-        if !val._active_languages.is_empty() {
-            rt.active_languages = Some(to.with_set(val._active_languages));
-        }
-
         rt
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct CreatePublicationInput {
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(range(min = 1, max = 10000))]
+    pub version: i16,
+    pub draft: Option<PublicationDraftInput>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct PublicationDraftInput {
+    pub gid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(length(min = 3, max = 16))]
+    pub model: String,
+    #[validate(length(min = 3, max = 512))]
+    pub title: String,
+    #[validate(length(min = 0, max = 1024))]
+    pub description: String,
+    #[validate(url)]
+    pub cover: String,
+    #[validate(length(min = 0, max = 10))]
+    pub keywords: Vec<String>,
+    #[validate(length(min = 0, max = 2048))]
+    pub summary: String,
+    pub content: PackObject<Vec<u8>>,
 }
 
 pub async fn create(
@@ -107,126 +126,203 @@ pub async fn create(
 ) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
     ctx.set_kvs(vec![
         ("action", "create_publication".into()),
         ("gid", input.gid.to_string().into()),
-        ("id", input.id.to_string().into()),
         ("cid", input.cid.to_string().into()),
+        ("language", input.language.to_639_3().into()),
+        ("version", input.version.into()),
     ])
     .await;
 
-    let cid = *input.cid.to_owned();
-    let mut index = db::CreationIndex::with_pk(cid);
+    let gid = input.gid.unwrap();
+    let cid = input.cid.unwrap();
+    let language = input.language.unwrap();
 
+    let mut index = db::CreationIndex::with_pk(cid);
     if index.get_one(&app.scylla).await.is_err() {
-        return Err(HTTPError::new(
-            404,
-            format!("Creation not exists, cid({})", input.cid.as_ref()),
-        ));
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
     }
     if index.rating == i8::MAX {
-        return Err(HTTPError::new(
-            451,
-            format!("Creation is banned, cid({})", input.cid.as_ref()),
-        ));
+        return Err(HTTPError::new(451, "Creation is banned".to_string()));
     }
 
-    let mut draft = db::PublicationDraft {
-        gid: *input.gid.to_owned(),
-        id: *input.id.to_owned(),
-        cid,
-        ..Default::default()
+    let mut doc = if input.draft.is_none() {
+        db::Publication::create_from_creation(&app.scylla, gid, cid, ctx.user).await?
+    } else {
+        let draft = input.draft.unwrap();
+        let content = draft.content.unwrap();
+        let user_gid = draft.gid.unwrap();
+        if index.rating > ctx.rating && gid != user_gid {
+            return Err(HTTPError::new(451, "Can not view publication".to_string()));
+        }
+
+        db::Publication::create_from_publication(
+            &app.scylla,
+            db::Publication::with_pk(gid, cid, language, input.version),
+            db::Publication {
+                gid: user_gid,
+                cid,
+                language: draft.language.unwrap(),
+                version: input.version,
+                model: draft.model,
+                title: draft.title,
+                description: draft.description,
+                cover: draft.cover,
+                keywords: draft.keywords,
+                summary: draft.summary,
+                ..Default::default()
+            },
+            content,
+        )
+        .await?
     };
-    if draft.get_one(&app.scylla, Vec::new()).await.is_err() {
-        return Err(HTTPError::new(
-            404,
-            format!(
-                "Publication draft not exists, gid({}), id({}), cid({})",
-                draft.gid, draft.id, draft.cid
-            ),
-        ));
-    }
-    if draft.status != 1 {
-        return Err(HTTPError::new(
-            400,
-            format!(
-                "Publication draft status not match, gid({}), id({}), cid({}), expected 1, got {}",
-                *input.gid, *input.id, *input.cid, draft.status
-            ),
-        ));
-    }
 
-    let mut publication: db::Publication =
-        db::Publication::save_from(&app.scylla, index.gid, draft).await?;
+    doc._rating = index.rating;
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+}
 
-    publication._rating = index.rating;
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(
-        publication,
-        &to,
-    ))))
+#[derive(Debug, Deserialize, Validate)]
+pub struct QueryPublicationInputput {
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(range(min = 0, max = 10000))] // 0 means latest
+    pub version: i16,
+    pub fields: Option<String>,
 }
 
 pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdLanguageVersion>,
+    input: Query<QueryPublicationInputput>,
 ) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
+    let cid = *input.cid.to_owned();
     let language = *input.language.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_publication".into()),
-        ("id", input.id.to_string().into()),
-        ("language", input.language.to_name().into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_639_3().into()),
         ("version", input.version.into()),
     ])
     .await;
 
-    let mut index = db::CreationIndex::with_pk(id);
-
+    let mut index = db::CreationIndex::with_pk(cid);
     if index.get_one(&app.scylla).await.is_err() {
-        return Err(HTTPError::new(
-            404,
-            format!("Creation not exists, cid({})", *input.id),
-        ));
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
     }
-    if index.rating > ctx.rating {
-        return Err(HTTPError::new(
-            451,
-            format!(
-                "Publication rating not match, id({}), gid({}), expected(*), got({})",
-                index.id, index.gid, ctx.rating
-            ),
-        ));
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let mut doc = db::Publication::with_pk(id, language, input.version);
-    let fields = input
-        .fields
-        .clone()
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.to_string())
-        .collect();
-    doc.get_one(&app.scylla, fields).await?;
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
     doc._rating = index.rating;
 
-    let mut creation = db::Creation::with_pk(index.gid, index.id);
-    let _ = creation
-        .get_one(
-            &app.scylla,
-            vec!["language".to_string(), "active_languages".to_string()],
-        )
-        .await; // maybe deleted.
-    if !creation.active_languages.is_empty() {
-        doc._active_languages = creation.active_languages;
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+}
+
+pub async fn list(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = input.gid.unwrap();
+    let page_size = input.page_size.unwrap_or(10);
+    ctx.set_kvs(vec![
+        ("action", "list_creation".into()),
+        ("gid", gid.to_string().into()),
+        ("page_size", page_size.into()),
+    ])
+    .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let res = db::Publication::list_by_gid(
+        &app.scylla,
+        gid,
+        fields,
+        page_size,
+        token_to_xid(&input.page_token),
+        input.status,
+    )
+    .await?;
+    let next_page_token = if res.len() >= page_size as usize {
+        let v = res.last().unwrap();
+        to.with_option(token_from_xid(v.cid))
+    } else {
+        None
+    };
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token,
+        result: res
+            .iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+pub async fn list_published(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryGidCid>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = *input.gid.to_owned();
+    let cid = *input.cid.to_owned();
+    ctx.set_kvs(vec![
+        ("action", "list_published".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+    ])
+    .await;
+
+    let mut index = db::CreationIndex::with_pk(cid);
+    if index.get_one(&app.scylla).await.is_err() {
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
+    }
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+    let docs = db::Publication::list_published_by_cid(&app.scylla, cid).await?;
+
+    ctx.set("total_size", docs.len().into()).await;
+    Ok(to.with(SuccessResponse::new(
+        docs.iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    )))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdatePublicationStatusInput {
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(range(min = 1, max = 10000))]
+    pub version: i16,
+    pub updated_at: i64,
+    #[validate(range(min = -1, max = 2))]
+    pub status: i8,
 }
 
 pub async fn update_status(
@@ -236,18 +332,22 @@ pub async fn update_status(
 ) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let id = *input.id.to_owned();
-    let language = *input.language.to_owned();
+    let gid = input.gid.unwrap();
+    let cid = input.cid.unwrap();
+    let language = input.language.unwrap();
+
     ctx.set_kvs(vec![
         ("action", "update_publication_status".into()),
-        ("id", input.id.to_string().into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
         ("language", language.to_name().into()),
         ("version", input.version.into()),
     ])
     .await;
 
-    let mut doc = db::Publication::with_pk(id, language, input.version);
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
 
     let ok = doc
         .update_status(&app.scylla, input.status, input.updated_at)
@@ -258,93 +358,159 @@ pub async fn update_status(
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
 
-pub async fn delete(
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdatePublicationInput {
+    pub cid: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(range(min = 1, max = 10000))]
+    pub version: i16,
+    pub updated_at: i64,
+    #[validate(length(min = 3, max = 512))]
+    pub model: Option<String>,
+    #[validate(length(min = 3, max = 512))]
+    pub title: Option<String>,
+    #[validate(length(min = 3, max = 1024))]
+    pub description: Option<String>,
+    #[validate(url)]
+    pub cover: Option<String>,
+    #[validate(length(min = 0, max = 10))]
+    pub keywords: Option<Vec<String>>,
+    #[validate(length(min = 0, max = 2048))]
+    pub summary: Option<String>,
+}
+
+impl UpdatePublicationInput {
+    fn into(self) -> anyhow::Result<ColumnsMap> {
+        let mut cols = ColumnsMap::new();
+        if let Some(model) = self.model {
+            cols.set_as("model", &model);
+        }
+        if let Some(title) = self.title {
+            cols.set_as("title", &title);
+        }
+        if let Some(description) = self.description {
+            cols.set_as("description", &description);
+        }
+        if let Some(cover) = self.cover {
+            cols.set_as("cover", &cover);
+        }
+        if let Some(keywords) = self.keywords {
+            cols.set_as("keywords", &keywords);
+        }
+        if let Some(summary) = self.summary {
+            cols.set_as("summary", &summary);
+        }
+
+        if cols.is_empty() {
+            return Err(HTTPError::new(400, "No fields to update".to_string()).into());
+        }
+
+        Ok(cols)
+    }
+}
+
+pub async fn update(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<QueryIdLanguageVersion>,
-) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    to: PackObject<UpdatePublicationInput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
 
-    let id = *input.id.to_owned();
+    let cid = *input.cid.to_owned();
+    let gid = *input.gid.to_owned();
     let language = *input.language.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "delete_publication".into()),
-        ("id", input.id.to_string().into()),
-        ("language", input.language.to_name().into()),
+        ("action", "update_publication".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_639_3().into()),
         ("version", input.version.into()),
     ])
     .await;
 
-    let mut doc = db::Publication::with_pk(id, language, input.version);
-    let res = doc.delete(&app.scylla).await?;
-    Ok(to.with(SuccessResponse::new(res)))
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
+    let updated_at = input.updated_at;
+    let cols = input.into()?;
+
+    let ok = doc.update(&app.scylla, cols, updated_at).await?;
+    ctx.set("updated", ok.into()).await;
+
+    doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
 
-#[derive(Debug, Deserialize, Serialize, Validate)]
-pub struct BatchGetPublicationsInput {
-    #[validate(range(min = -1, max = 2))]
-    pub min_status: i8,
-    pub fields: Option<Vec<String>>,
-    #[validate(length(min = 1, max = 100))]
-    pub pks: Vec<(PackObject<xid::Id>, PackObject<Language>, i16)>,
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdatePublicationContentInput {
+    pub cid: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    pub language: PackObject<isolang::Language>,
+    #[validate(range(min = 1, max = 10000))]
+    pub version: i16,
+    pub updated_at: i64,
+    pub content: PackObject<Vec<u8>>,
 }
 
-pub async fn batch_get(
+pub async fn update_content(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<BatchGetPublicationsInput>,
-) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    to: PackObject<UpdatePublicationContentInput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = input.gid.unwrap();
+    let cid = input.cid.unwrap();
+    let language = input.language.unwrap();
+    let content = input.content.unwrap();
 
     ctx.set_kvs(vec![
-        ("action", "batch_get".into()),
-        ("min_status", input.min_status.into()),
-        ("length", input.pks.len().into()),
+        ("action", "update_publication_status".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_name().into()),
+        ("version", input.version.into()),
     ])
     .await;
 
-    let mut ids: Vec<xid::Id> = Vec::with_capacity(input.pks.len());
-    for (id, _, version) in &input.pks {
-        if *version < 0 {
-            return Err(HTTPError::new(400, format!("Invalid version {}", version)));
-        }
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
 
-        ids.push(*id.to_owned());
-    }
+    let ok = doc
+        .update_content(&app.scylla, content, input.updated_at)
+        .await?;
+    ctx.set("updated", ok.into()).await;
 
-    let indexs = db::CreationIndex::batch_get(&app.scylla, ids, ctx.rating).await?;
-    let ratings_map: HashMap<xid::Id, i8> = indexs.into_iter().map(|i| (i.id, i.rating)).collect();
+    doc._fields = vec!["updated_at".to_string()];
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+}
 
-    let min_status = input.min_status;
-    let mut select_fields = db::Publication::select_fields(input.fields.unwrap_or_default(), true)?;
-    let status = "status".to_string();
-    if !select_fields.contains(&status) {
-        select_fields.push(status);
-    }
+pub async fn delete(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryPublicationInputput>,
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
 
-    let mut res: Vec<db::Publication> = Vec::with_capacity(ratings_map.len());
-    for (id, language, version) in &input.pks {
-        let id = *id.to_owned();
-        if ratings_map.contains_key(&id) {
-            let mut item = db::Publication::with_pk(id, *language.to_owned(), *version);
-            if item
-                .get_one(&app.scylla, select_fields.clone())
-                .await
-                .is_ok()
-                && item.status >= min_status
-            {
-                item._rating = ratings_map.get(&id).unwrap().to_owned();
-                res.push(item);
-            }
-        }
-    }
+    let gid = *input.gid.to_owned();
+    let cid = *input.cid.to_owned();
+    let language = *input.language.to_owned();
 
-    Ok(to.with(SuccessResponse::new(
-        res.iter()
-            .map(|r| PublicationOutput::from(r.to_owned(), &to))
-            .collect(),
-    )))
+    ctx.set_kvs(vec![
+        ("action", "delete_publication".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_639_3().into()),
+        ("version", input.version.into()),
+    ])
+    .await;
+
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
+    let res = doc.delete(&app.scylla).await?;
+    Ok(to.with(SuccessResponse::new(res)))
 }

@@ -19,8 +19,7 @@ use serde::{
 };
 use std::{collections::HashSet, error::Error, fmt, ops::Deref, str::FromStr};
 
-use crate::encoding::Encoding;
-use crate::erring::HTTPError;
+use crate::{encoding::Encoding, erring::HTTPError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackObject<T> {
@@ -30,6 +29,13 @@ pub enum PackObject<T> {
 
 impl<S> PackObject<S> {
     pub fn unwrap(self) -> S {
+        match self {
+            PackObject::Json(v) => v,
+            PackObject::Cbor(v) => v,
+        }
+    }
+
+    pub fn unwrap_ref(&self) -> &S {
         match self {
             PackObject::Json(v) => v,
             PackObject::Cbor(v) => v,
@@ -54,6 +60,13 @@ impl<S> PackObject<S> {
         match self {
             PackObject::Json(_) => PackObject::Json(v),
             PackObject::Cbor(_) => PackObject::Cbor(v),
+        }
+    }
+
+    pub fn with_option<T>(&self, v: Option<T>) -> Option<PackObject<T>> {
+        match self {
+            PackObject::Json(_) => v.map(PackObject::Json),
+            PackObject::Cbor(_) => v.map(PackObject::Cbor),
         }
     }
 
@@ -307,15 +320,9 @@ impl<'de> de::Visitor<'de> for PackObjectXidVisitor {
     where
         E: de::Error,
     {
-        if v.len() != 12 {
-            Err(de::Error::custom(format!(
-                "expected value length 12, got {:?}",
-                v.len()
-            )))
-        } else {
-            let mut bytes = [0u8; 12];
-            bytes.copy_from_slice(v);
-            Ok(PackObject::Cbor(xid::Id(bytes)))
+        match xid::Id::from_bytes(v) {
+            Ok(id) => Ok(PackObject::Cbor(id)),
+            Err(err) => Err(de::Error::custom(err)),
         }
     }
 
@@ -323,15 +330,9 @@ impl<'de> de::Visitor<'de> for PackObjectXidVisitor {
     where
         E: de::Error,
     {
-        if v.len() != 12 {
-            Err(de::Error::custom(format!(
-                "expected value length 12, got {:?}",
-                v.len()
-            )))
-        } else {
-            let mut bytes = [0u8; 12];
-            bytes.copy_from_slice(v);
-            Ok(PackObject::Cbor(xid::Id(bytes)))
+        match xid::Id::from_bytes(v) {
+            Ok(id) => Ok(PackObject::Cbor(id)),
+            Err(err) => Err(de::Error::custom(err)),
         }
     }
 
@@ -339,15 +340,9 @@ impl<'de> de::Visitor<'de> for PackObjectXidVisitor {
     where
         E: de::Error,
     {
-        if v.len() != 12 {
-            Err(de::Error::custom(format!(
-                "expected value length 12, got {:?}",
-                v.len()
-            )))
-        } else {
-            let mut bytes = [0u8; 12];
-            bytes.copy_from_slice(&v);
-            Ok(PackObject::Cbor(xid::Id(bytes)))
+        match xid::Id::from_bytes(&v) {
+            Ok(id) => Ok(PackObject::Cbor(id)),
+            Err(err) => Err(de::Error::custom(err)),
         }
     }
 
@@ -642,4 +637,26 @@ where
                 .into_response(),
         }
     }
+}
+
+pub fn cbor_from_slice<T>(bytes: &[u8]) -> Result<T, HTTPError>
+where
+    T: DeserializeOwned,
+{
+    let value: T = ciborium::from_reader(bytes).map_err(|err| HTTPError {
+        code: StatusCode::BAD_REQUEST.as_u16(),
+        message: format!("Invalid CBOR bytes, {}", err),
+        data: None,
+    })?;
+    Ok(value)
+}
+
+pub fn cbor_to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, HTTPError> {
+    let mut buf: Vec<u8> = Vec::new();
+    ciborium::into_writer(value, &mut buf).map_err(|err| HTTPError {
+        code: StatusCode::BAD_REQUEST.as_u16(),
+        message: format!("Failed to serialize CBOR, {}", err),
+        data: None,
+    })?;
+    Ok(buf)
 }

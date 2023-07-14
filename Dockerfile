@@ -57,4 +57,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /src/config ./config
 COPY --from=builder /src/release/writing ./
+ENV CONFIG_FILE_PATH=./config/config.toml
+
 ENTRYPOINT ["./writing"]
