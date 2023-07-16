@@ -177,7 +177,7 @@ impl MeiliSearch {
         space: Space,
         lang: Option<Language>,
         q: &str,
-        to: PackObject<()>,
+        to: &PackObject<()>,
     ) -> anyhow::Result<SearchOutput> {
         let (mut sq, gid) = match space {
             Space::Group(gid) => (SearchQuery::new(&self.icreation), Some(gid)),
@@ -214,7 +214,7 @@ impl MeiliSearch {
             hits: res
                 .hits
                 .into_iter()
-                .map(|d| DocumentOutput::from(d.result, &to))
+                .map(|d| DocumentOutput::from(d.result, to))
                 .collect(),
             languages: res
                 .facet_distribution

@@ -11,6 +11,7 @@ use crate::db;
 pub mod collection;
 pub mod creation;
 pub mod publication;
+pub mod search;
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

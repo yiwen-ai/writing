@@ -46,6 +46,8 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
     let app = Router::new()
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
+        .route("/v1/group_search", routing::get(api::search::group_search))
+        .route("/v1/search", routing::get(api::search::search))
         .nest(
             "/v1/creation",
             Router::new()
@@ -128,11 +130,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{
-        self,
-        header::{HeaderValue},
-        StatusCode,
-    };
+    use axum::http::{self, header::HeaderValue, StatusCode};
     use base64::{engine::general_purpose, Engine as _};
     use ciborium::cbor;
     use serde_json::json;
