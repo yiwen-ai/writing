@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{convert::From, sync::Arc};
 use validator::Validate;
 
-use crate::db;
+use crate::db::{self, meili};
 
 use axum_web::context::ReqContext;
 use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
@@ -156,6 +156,9 @@ pub async fn create(
 
     let ok = doc.save_with(&app.scylla, input.content.unwrap()).await?;
     ctx.set("created", ok.into()).await;
+    app.meili
+        .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+        .await?;
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -312,6 +315,10 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
+    app.meili
+        .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+        .await?;
+
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
@@ -413,5 +420,8 @@ pub async fn delete(
 
     let mut doc = db::Creation::with_pk(gid, id);
     let res = doc.delete(&app.scylla).await?;
+    app.meili
+        .delete(meili::Space::Group(doc.gid), vec![doc.to_meili().id])
+        .await?;
     Ok(to.with(SuccessResponse::new(res)))
 }

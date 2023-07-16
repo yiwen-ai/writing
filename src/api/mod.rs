@@ -19,6 +19,7 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct AppState {
     pub start_at: u64,
     pub scylla: Arc<db::scylladb::ScyllaDB>,
+    pub meili: Arc<db::meili::MeiliSearch>,
 }
 
 #[derive(Serialize, Deserialize)]

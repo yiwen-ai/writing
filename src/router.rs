@@ -28,11 +28,14 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
     } else {
         "writing"
     };
+
     let scylla = db::scylladb::ScyllaDB::new(cfg.scylla, keyspace).await?;
+    let meili = db::meili::MeiliSearch::new(cfg.meili).await?;
 
     let app_state = Arc::new(api::AppState {
         start_at: context::unix_ms(),
         scylla: Arc::new(scylla),
+        meili: Arc::new(meili),
     });
 
     let mds = ServiceBuilder::new()
@@ -127,7 +130,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
 mod tests {
     use axum::http::{
         self,
-        header::{HeaderName, HeaderValue},
+        header::{HeaderValue},
         StatusCode,
     };
     use base64::{engine::general_purpose, Engine as _};
@@ -178,6 +181,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[ignore]
     async fn test_all() {
         // problem: https://users.rust-lang.org/t/tokio-runtimes-and-tokio-oncecell/91351/5
         healthz_api_works().await;

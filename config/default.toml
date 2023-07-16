@@ -21,3 +21,7 @@ nodes = ["127.0.0.1:9042"]
 username = ""
 # Scylla server password
 password = ""
+
+[meili]
+url = "http://127.0.0.1:7700"
+api_key = ""

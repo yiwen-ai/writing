@@ -5,8 +5,8 @@ use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
+    meili,
+    scylladb::{self, extract_applied, Query},
     Content, Creation,
 };
 use axum_web::context::unix_ms;
@@ -146,6 +146,32 @@ impl Publication {
             .into()),
             _ => Ok(()),
         }
+    }
+
+    pub fn to_meili(&self) -> meili::Document {
+        let mut doc = meili::Document::new(self.cid, self.language, self.gid);
+        doc.kind = 1;
+        doc.version = self.version;
+        doc.updated_at = self.updated_at;
+        if !self.genre.is_empty() {
+            doc.genre = Some(self.genre.clone());
+        }
+        if !self.title.is_empty() {
+            doc.title = Some(self.title.clone());
+        }
+        if !self.description.is_empty() {
+            doc.description = Some(self.description.clone());
+        }
+        if !self.keywords.is_empty() {
+            doc.keywords = Some(self.keywords.clone());
+        }
+        if !self.authors.is_empty() {
+            doc.authors = Some(self.authors.clone());
+        }
+        if !self.summary.is_empty() {
+            doc.summary = Some(self.summary.clone());
+        }
+        doc
     }
 
     pub async fn get_one(
@@ -401,6 +427,7 @@ impl Publication {
             .into());
         }
 
+        self.fill(&cols); // fill for meilisearch update
         self.updated_at = new_updated_at;
         Ok(true)
     }

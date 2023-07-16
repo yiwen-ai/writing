@@ -7,8 +7,8 @@ use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
-    scylladb,
-    scylladb::{extract_applied, Query},
+    meili,
+    scylladb::{self, extract_applied, Query},
     Content,
 };
 
@@ -155,6 +155,32 @@ impl Creation {
         }
 
         Ok(select_fields)
+    }
+
+    pub fn to_meili(&self) -> meili::Document {
+        let mut doc = meili::Document::new(self.id, self.language, self.gid);
+        doc.kind = 0;
+        doc.version = self.version;
+        doc.updated_at = self.updated_at;
+        if !self.genre.is_empty() {
+            doc.genre = Some(self.genre.clone());
+        }
+        if !self.title.is_empty() {
+            doc.title = Some(self.title.clone());
+        }
+        if !self.description.is_empty() {
+            doc.description = Some(self.description.clone());
+        }
+        if !self.keywords.is_empty() {
+            doc.keywords = Some(self.keywords.clone());
+        }
+        if !self.authors.is_empty() {
+            doc.authors = Some(self.authors.clone());
+        }
+        if !self.summary.is_empty() {
+            doc.summary = Some(self.summary.clone());
+        }
+        doc
     }
 
     pub fn valid_status(&self, status: i8) -> anyhow::Result<()> {
@@ -470,8 +496,15 @@ impl Creation {
             }
         }
 
-        self.get_one(db, vec!["status".to_string(), "updated_at".to_string()])
-            .await?;
+        self.get_one(
+            db,
+            vec![
+                "status".to_string(),
+                "updated_at".to_string(),
+                "version".to_string(), // for meilisearch update
+            ],
+        )
+        .await?;
         if self.updated_at != updated_at {
             return Err(HTTPError::new(
                 409,
@@ -519,6 +552,7 @@ impl Creation {
             .into());
         }
 
+        self.fill(&cols); // fill for meilisearch update
         self.updated_at = new_updated_at;
         Ok(true)
     }

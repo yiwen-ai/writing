@@ -5,6 +5,7 @@ mod model_publication;
 
 use model_content::Content;
 
+pub mod meili;
 pub mod scylladb;
 
 pub use model_collection::Collection;

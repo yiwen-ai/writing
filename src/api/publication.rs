@@ -13,7 +13,7 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use crate::api::{get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryGidCid};
-use crate::db;
+use crate::db::{self, meili};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PublicationOutput {
@@ -179,6 +179,10 @@ pub async fn create(
         )
         .await?
     };
+
+    app.meili
+        .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+        .await?;
 
     doc._rating = index.rating;
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
@@ -354,6 +358,14 @@ pub async fn update_status(
         .await?;
     ctx.set("updated", ok.into()).await;
 
+    if input.status == 2 {
+        // get full doc for meili
+        doc.get_one(&app.scylla, vec![]).await?;
+        app.meili
+            .add_or_update(meili::Space::Pub(None), vec![doc.to_meili()])
+            .await?;
+    }
+
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
@@ -439,6 +451,9 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
+    app.meili
+        .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+        .await?;
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
@@ -512,5 +527,8 @@ pub async fn delete(
 
     let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
     let res = doc.delete(&app.scylla).await?;
+    app.meili
+        .delete(meili::Space::Group(doc.gid), vec![doc.to_meili().id])
+        .await?;
     Ok(to.with(SuccessResponse::new(res)))
 }

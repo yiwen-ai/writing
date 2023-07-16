@@ -22,11 +22,18 @@ pub struct ScyllaDB {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct Meili {
+    pub url: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Conf {
     pub env: String,
     pub log: Log,
     pub server: Server,
     pub scylla: ScyllaDB,
+    pub meili: Meili,
 }
 
 impl Conf {
