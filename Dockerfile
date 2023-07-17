@@ -19,7 +19,7 @@ FROM chef as builder
 WORKDIR /src
 
 COPY --from=xx / /
-RUN apt-get update && apt-get install -y clang lld cmake
+RUN apt-get update && apt-get install -y clang lld cmake apt-file
 
 # `ARG`/`ENV` pair is a workaround for `docker build` backward-compatibility.
 #
@@ -39,7 +39,7 @@ ARG TARGETPLATFORM
 ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
 RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config libssl-dev
-RUN xx-apt-get install -y  apt-file && apt-file update && apt-file list libssl-dev
+RUN apt-file update && apt-file list libssl-dev
 
 ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu/openssl
 ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
