@@ -7,7 +7,7 @@ FROM --platform=${BUILDPLATFORM:-linux/amd64} tonistiigi/xx AS xx
 # Utilizing Docker layer caching with `cargo-chef`.
 #
 # https://www.lpalmieri.com/posts/fast-rust-docker-builds/
-FROM --platform=${BUILDPLATFORM:-linux/amd64} lukemathwalker/cargo-chef:latest-rust-1.70.0 AS chef
+FROM --platform=${BUILDPLATFORM:-linux/amd64} lukemathwalker/cargo-chef:latest-rust-slim-bookworm AS chef
 
 
 FROM chef AS planner
@@ -47,10 +47,10 @@ COPY . .
 RUN xx-cargo build --release \
     && mv target/$(xx-cargo --print-target-triple)/release /src/release
 
-FROM debian:12-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y ca-certificates tzdata curl \
+    && apt-get install -y ca-certificates tzdata curl libssl3 \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
