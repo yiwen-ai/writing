@@ -38,7 +38,11 @@ RUN case "$BUILDPLATFORM" in \
 ARG TARGETPLATFORM
 ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
-RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config openssl libssl-dev ca-certificates
+RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config libssl-dev
+
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu/openssl
+ENV OPENSSL_INCLUDE_DIR=/usr/include/openssl
+ENV OPENSSL_LIB_DIR=/usr/bin/openssl
 
 COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
@@ -50,9 +54,11 @@ RUN xx-cargo build --release \
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y ca-certificates tzdata curl libssl3 \
+    && apt-get install -y ca-certificates tzdata curl openssl \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+ENV OPENSSL_LIB_DIR=/usr/bin/openssl
 
 WORKDIR /app
 COPY --from=builder /src/config ./config
