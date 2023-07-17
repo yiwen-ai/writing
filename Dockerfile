@@ -41,10 +41,12 @@ ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config libssl-dev
 RUN apt-file update && apt-file list libssl-dev
 
-ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu/openssl
-ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
 ENV OPENSSL_INCLUDE_DIR=/usr/include/openssl
-ENV OPENSSL_LIB_DIR=/usr/lib
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu/openssl
+ENV X86_64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/x86_64-linux-gnu/openssl
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
+ENV X86_64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu
+ENV OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu
 
 COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
@@ -61,7 +63,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
-ENV OPENSSL_LIB_DIR=/usr/lib
+ENV OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu
 
 WORKDIR /app
 COPY --from=builder /src/config ./config
