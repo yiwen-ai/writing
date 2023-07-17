@@ -38,7 +38,7 @@ RUN case "$BUILDPLATFORM" in \
 ARG TARGETPLATFORM
 ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
-RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config libssl-dev
+RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config openssl libssl-dev ca-certificates
 
 COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
