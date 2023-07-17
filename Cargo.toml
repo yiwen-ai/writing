@@ -40,7 +40,7 @@ log = "0.4"
 mime = "0.3"
 scylla = "0.8"
 serde = "1.0"
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 structured-logger = "1.0"
 tokio = { version = "1.28", features = [
   "fs",

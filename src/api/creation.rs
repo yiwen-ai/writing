@@ -15,7 +15,8 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use super::{
-    get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryGidId, UpdateStatusInput,
+    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, Pagination,
+    QueryGidId, UpdateStatusInput,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -25,17 +26,21 @@ pub struct CreateCreationInput {
     #[validate(url)]
     pub original_url: Option<String>,
     pub genre: Option<Vec<String>>,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 3, max = 256))]
     pub title: String,
-    #[validate(length(min = 3, max = 1024))]
+    #[validate(length(min = 3, max = 512))]
     pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
+    #[validate(length(min = 0, max = 5))]
     pub keywords: Option<Vec<String>>,
+    #[validate(length(min = 0, max = 5))]
     pub labels: Option<Vec<String>>,
+    #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
+    #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
     #[validate(url)]
     pub license: Option<String>,
@@ -156,9 +161,24 @@ pub async fn create(
 
     let ok = doc.save_with(&app.scylla, input.content.unwrap()).await?;
     ctx.set("created", ok.into()).await;
-    app.meili
+
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "add_or_update",
+            space = "group",
+            rid = ctx.rid,
+            gid = doc.gid.to_string(),
+            cid = doc.id.to_string(),
+            kind = 0i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -235,21 +255,20 @@ pub struct UpdateCreationInput {
     pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 3, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 3, max = 1024))]
+    #[validate(length(min = 3, max = 512))]
     pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
-    #[validate(length(min = 0, max = 10))]
+    #[validate(length(min = 0, max = 5))]
     pub keywords: Option<Vec<String>>,
-    #[validate(length(min = 0, max = 20))]
+    #[validate(length(min = 0, max = 5))]
     pub labels: Option<Vec<String>>,
-    #[validate(length(min = 0, max = 100))]
+    #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
     #[validate(length(min = 10, max = 2048))]
     pub summary: Option<String>,
-    pub content: Option<PackObject<Vec<u8>>>,
     #[validate(url)]
     pub license: Option<String>,
 }
@@ -315,9 +334,23 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
-    app.meili
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "add_or_update",
+            space = "group",
+            rid = ctx.rid,
+            gid = doc.gid.to_string(),
+            cid = doc.id.to_string(),
+            kind = 0i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
@@ -328,6 +361,7 @@ pub struct UpdateCreationContentInput {
     pub gid: PackObject<xid::Id>,
     pub id: PackObject<xid::Id>,
     pub language: PackObject<Language>,
+    #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
     pub updated_at: i64,
 }
@@ -420,8 +454,23 @@ pub async fn delete(
 
     let mut doc = db::Creation::with_pk(gid, id);
     let res = doc.delete(&app.scylla).await?;
-    app.meili
+
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .delete(meili::Space::Group(doc.gid), vec![doc.to_meili().id])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "delete",
+            space = "group",
+            rid = ctx.rid,
+            gid = gid.to_string(),
+            cid = id.to_string(),
+            kind = 0i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
     Ok(to.with(SuccessResponse::new(res)))
 }

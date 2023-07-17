@@ -12,7 +12,10 @@ use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use crate::api::{get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryGidCid};
+use crate::api::{
+    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, Pagination,
+    QueryGidCid,
+};
 use crate::db::{self, meili};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -106,16 +109,17 @@ pub struct PublicationDraftInput {
     pub language: PackObject<isolang::Language>,
     #[validate(length(min = 3, max = 16))]
     pub model: String,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 3, max = 256))]
     pub title: String,
-    #[validate(length(min = 0, max = 1024))]
+    #[validate(length(min = 0, max = 512))]
     pub description: String,
     #[validate(url)]
     pub cover: String,
-    #[validate(length(min = 0, max = 10))]
+    #[validate(length(min = 0, max = 5))]
     pub keywords: Vec<String>,
     #[validate(length(min = 0, max = 2048))]
     pub summary: String,
+    #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
 }
 
@@ -159,6 +163,13 @@ pub async fn create(
             return Err(HTTPError::new(451, "Can not view publication".to_string()));
         }
 
+        ctx.set_kvs(vec![
+            ("draft.gid", user_gid.to_string().into()),
+            ("draft.language", draft.language.to_639_3().into()),
+            ("draft.model", draft.model.as_str().into()),
+        ])
+        .await;
+
         db::Publication::create_from_publication(
             &app.scylla,
             db::Publication::with_pk(gid, cid, language, input.version),
@@ -180,9 +191,23 @@ pub async fn create(
         .await?
     };
 
-    app.meili
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "add_or_update",
+            space = "group",
+            rid = ctx.rid,
+            gid = doc.gid.to_string(),
+            cid = doc.cid.to_string(),
+            kind = 1i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
 
     doc._rating = index.rating;
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
@@ -361,9 +386,23 @@ pub async fn update_status(
     if input.status == 2 {
         // get full doc for meili
         doc.get_one(&app.scylla, vec![]).await?;
-        app.meili
-            .add_or_update(meili::Space::Pub(None), vec![doc.to_meili()])
-            .await?;
+        let meili_start = ctx.start.elapsed().as_millis() as u64;
+        if let Err(err) = app
+            .meili
+            .add_or_update(meili::Space::Pub(Some(gid)), vec![doc.to_meili()])
+            .await
+        {
+            log::error!(target: "meilisearch",
+                action = "add_or_update",
+                space = "pub",
+                rid = ctx.rid,
+                gid = doc.gid.to_string(),
+                cid = doc.cid.to_string(),
+                kind = 1i8,
+                elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+                "{}", err.to_string(),
+            );
+        }
     }
 
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
@@ -378,15 +417,15 @@ pub struct UpdatePublicationInput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 3, max = 16))]
     pub model: Option<String>,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 3, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 3, max = 1024))]
+    #[validate(length(min = 3, max = 512))]
     pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
-    #[validate(length(min = 0, max = 10))]
+    #[validate(length(min = 0, max = 5))]
     pub keywords: Option<Vec<String>>,
     #[validate(length(min = 0, max = 2048))]
     pub summary: Option<String>,
@@ -451,9 +490,24 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
-    app.meili
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "add_or_update",
+            space = "group",
+            rid = ctx.rid,
+            gid = doc.gid.to_string(),
+            cid = doc.cid.to_string(),
+            kind = 1i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
+
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
@@ -466,6 +520,7 @@ pub struct UpdatePublicationContentInput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub updated_at: i64,
+    #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
 }
 
@@ -527,8 +582,23 @@ pub async fn delete(
 
     let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
     let res = doc.delete(&app.scylla).await?;
-    app.meili
+
+    let meili_start = ctx.start.elapsed().as_millis() as u64;
+    if let Err(err) = app
+        .meili
         .delete(meili::Space::Group(doc.gid), vec![doc.to_meili().id])
-        .await?;
+        .await
+    {
+        log::error!(target: "meilisearch",
+            action = "delete",
+            space = "group",
+            rid = ctx.rid,
+            gid = gid.to_string(),
+            cid = cid.to_string(),
+            kind = 1i8,
+            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+            "{}", err.to_string(),
+        );
+    }
     Ok(to.with(SuccessResponse::new(res)))
 }

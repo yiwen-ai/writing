@@ -167,7 +167,9 @@ impl Serialize for PackObject<isolang::Language> {
         S: Serializer,
     {
         match self {
-            PackObject::Json(v) => serializer.serialize_str(v.to_name()),
+            PackObject::Json(v) => {
+                serializer.serialize_str(v.to_autonym().unwrap_or_else(|| v.to_name()))
+            }
             PackObject::Cbor(v) => serializer.serialize_str(v.to_639_3()),
         }
     }
@@ -268,7 +270,8 @@ impl<'de> de::Visitor<'de> for PackObjectLanguageVisitor {
     where
         E: de::Error,
     {
-        let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
+        let id = isolang::Language::from_str(v.to_ascii_lowercase().as_str())
+            .map_err(de::Error::custom)?;
         match v.len() {
             3 => Ok(PackObject::Cbor(id)),
             _ => Ok(PackObject::Json(id)),
@@ -279,7 +282,8 @@ impl<'de> de::Visitor<'de> for PackObjectLanguageVisitor {
     where
         E: de::Error,
     {
-        let id = isolang::Language::from_str(v).map_err(de::Error::custom)?;
+        let id = isolang::Language::from_str(v.to_ascii_lowercase().as_str())
+            .map_err(de::Error::custom)?;
         match v.len() {
             3 => Ok(PackObject::Cbor(id)),
             _ => Ok(PackObject::Json(id)),
@@ -290,7 +294,8 @@ impl<'de> de::Visitor<'de> for PackObjectLanguageVisitor {
     where
         E: de::Error,
     {
-        let id = isolang::Language::from_str(&v).map_err(de::Error::custom)?;
+        let id = isolang::Language::from_str(v.to_ascii_lowercase().as_str())
+            .map_err(de::Error::custom)?;
         match v.len() {
             3 => Ok(PackObject::Cbor(id)),
             _ => Ok(PackObject::Json(id)),

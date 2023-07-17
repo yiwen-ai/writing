@@ -19,6 +19,8 @@ pub struct Document {
     pub language: String,
     pub kind: i8, // 0: creation, 1: publication
     pub version: i16,
+
+    #[serde(default)]
     pub updated_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<Vec<String>>,
@@ -76,7 +78,7 @@ pub struct DocumentOutput {
 
 impl DocumentOutput {
     fn from(val: Document, to: &PackObject<()>) -> Self {
-        let (gid, language, cid) = val.extract_id();
+        let (cid, language, gid) = val.extract_id();
         Self {
             gid: to.with(gid.unwrap()),
             cid: to.with(cid.unwrap()),
@@ -114,6 +116,7 @@ pub struct SearchOutput {
 //         "summary"
 //     ],
 //     "displayedAttributes": [
+//         "id",
 //         "gid",
 //         "language",
 //         "kind",
