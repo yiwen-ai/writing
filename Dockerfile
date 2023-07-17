@@ -40,9 +40,11 @@ ENV TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
 
 RUN xx-apt-get install -y gcc g++ libc6-dev pkg-config libssl-dev
 
+ENV OPENSSL_STATIC=1
 ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR=/usr/include/aarch64-linux-gnu/openssl
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
 ENV OPENSSL_INCLUDE_DIR=/usr/include/openssl
-ENV OPENSSL_LIB_DIR=/usr/bin/openssl
+ENV OPENSSL_LIB_DIR=/usr/lib
 
 COPY --from=planner /src/recipe.json recipe.json
 RUN xx-cargo chef cook --release --recipe-path recipe.json
@@ -58,7 +60,8 @@ RUN apt-get update \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV OPENSSL_LIB_DIR=/usr/bin/openssl
+ENV AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR=/usr/lib/aarch64-linux-gnu
+ENV OPENSSL_LIB_DIR=/usr/lib
 
 WORKDIR /app
 COPY --from=builder /src/config ./config
