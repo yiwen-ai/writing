@@ -2,7 +2,7 @@ use serde::{de, Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt};
 use validator::ValidationError;
 
-use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
+use axum_web::object::{cbor_from_slice, PackObject};
 
 pub const MAX_CONTENT_LEN: usize = 1024 * 1024;
 
@@ -147,7 +147,7 @@ impl<'de> Deserialize<'de> for AttrValue {
 mod tests {
     use super::*;
 
-    // use faster_hex::hex_string;
+    use axum_web::object::cbor_to_vec;
 
     #[test]
     fn validate_cbor_content_works() {

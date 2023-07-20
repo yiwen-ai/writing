@@ -46,8 +46,15 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
     let app = Router::new()
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
-        .route("/v1/group_search", routing::get(api::search::group_search))
         .route("/v1/search", routing::get(api::search::search))
+        .route(
+            "/v1/search/in_group",
+            routing::get(api::search::group_search),
+        )
+        .route(
+            "/v1/search/by_original_url",
+            routing::get(api::search::original_search),
+        )
         .nest(
             "/v1/creation",
             Router::new()

@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS creation (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
+CREATE INDEX creation_gid_url ON creation ((gid), original_url);
 CREATE INDEX creation_gid_status ON creation ((gid), status);
 
 CREATE TABLE IF NOT EXISTS publication (
@@ -87,6 +88,7 @@ CREATE TABLE IF NOT EXISTS publication (
     AND default_time_to_live = 0;
 
 CREATE INDEX publication_cid ON publication (cid);
+CREATE INDEX publication_url ON publication (original_url);
 CREATE INDEX publication_gid_status ON publication ((gid), status);
 
 CREATE TABLE IF NOT EXISTS comment (

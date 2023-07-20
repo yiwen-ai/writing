@@ -1,5 +1,8 @@
 use isolang::Language;
-use std::time::{Duration, SystemTime};
+use std::{
+    string,
+    time::{Duration, SystemTime},
+};
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -660,6 +663,40 @@ impl Creation {
             doc._fields = fields.clone();
             res.push(doc);
         }
+
+        Ok(res)
+    }
+
+    pub async fn list_by_gid_url(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+        url: String,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Creation>> {
+        let mut fields = Self::select_fields(select_fields, true)?;
+        let field = "updated_at".to_string();
+        if !fields.contains(&field) {
+            fields.push(field)
+        }
+
+        let query = format!(
+                "SELECT {} FROM creation WHERE gid=? AND original_url=? LIMIT 10 BYPASS CACHE USING TIMEOUT 3s",
+                fields.clone().join(",")
+            );
+        let params = (gid.to_cql(), url);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Creation> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Creation::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        res.sort_by(|a, b| b.updated_at.partial_cmp(&a.updated_at).unwrap());
 
         Ok(res)
     }

@@ -767,6 +767,39 @@ impl Publication {
         // docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
         Ok(docs)
     }
+
+    pub async fn list_published_by_url(
+        db: &scylladb::ScyllaDB,
+        url: String,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Publication>> {
+        let mut fields = Self::select_fields(select_fields, true)?;
+        let field = "updated_at".to_string();
+        if !fields.contains(&field) {
+            fields.push(field)
+        }
+
+        let query = format!(
+                "SELECT {} FROM publication WHERE original_url=? AND status=? LIMIT 10 ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                fields.clone().join(",")
+            );
+        let params = (url, 2i8);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Publication> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Publication::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        res.sort_by(|a, b| b.updated_at.partial_cmp(&a.updated_at).unwrap());
+
+        Ok(res)
+    }
 }
 
 #[cfg(test)]
