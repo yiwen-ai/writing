@@ -666,16 +666,13 @@ impl Publication {
             } else if status.is_none() {
                 let query = Query::new(format!(
                 "SELECT {} FROM publication WHERE gid=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            ))
-            .with_page_size(query_size);
+                fields.clone().join(","))).with_page_size(query_size);
                 let params = (gid.to_cql(), query_size);
                 db.execute_iter(query, params).await?
             } else {
                 let query = Query::new(format!(
                 "SELECT {} FROM publication WHERE gid=? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            )).with_page_size(query_size);
+                fields.clone().join(","))).with_page_size(query_size);
                 let params = (gid.to_cql(), status.unwrap(), query_size);
                 db.execute_iter(query, params).await?
             };

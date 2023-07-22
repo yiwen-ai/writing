@@ -91,27 +91,6 @@ CREATE INDEX publication_cid ON publication (cid);
 CREATE INDEX publication_url ON publication (original_url);
 CREATE INDEX publication_gid_status ON publication ((gid), status);
 
-CREATE TABLE IF NOT EXISTS comment (
-    cid         BLOB,    -- creation id comment to, 12 bytes XID
-    id          BLOB,    -- comment id, 12 bytes XID
-    language    TEXT,    -- comment's language
-    status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
-    creator     BLOB,    -- comment's creator id, 12 bytes XID
-    created_at  BIGINT,  -- create at, unix time with second precision.
-    updated_at  BIGINT,  -- update at, can't update after approved.
-    approved_at BIGINT,  -- approved at.
-    content     BLOB,    -- content id, xid. TODO with ytsaurus
-    reply       BLOB,    -- optional, comment id reply to
-    PRIMARY KEY (cid, id)
-) WITH CLUSTERING ORDER BY (id DESC)
-    AND caching = {'enabled': 'true'}
-    AND comment = 'publication''s comments'
-    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 0;
-
-CREATE INDEX comment_cid_status ON comment ((cid), status);
-
 CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
@@ -190,25 +169,6 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
 ) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'false'}
     AND comment = 'publications'
-    AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 17280000;
-
-CREATE TABLE IF NOT EXISTS deleted_comment (
-    cid         BLOB,    -- creation id comment to, 12 bytes XID
-    id          BLOB,    -- comment id, 12 bytes XID
-    language    TEXT,    -- comment's language
-    status      TINYINT, -- int8, -1: Rejected, 0: Review, 1: Approved
-    creator     BLOB,    -- comment's creator id, 12 bytes XID
-    created_at  BIGINT,  -- create at, unix time with second precision.
-    updated_at  BIGINT,  -- update at, can't update after approved.
-    approved_at BIGINT,  -- approved at.
-    content     BLOB,    -- content id, xid. TODO with ytsaurus
-    reply       BLOB,    -- optional, comment id reply to
-    PRIMARY KEY (cid, id)
-) WITH CLUSTERING ORDER BY (id DESC)
-    AND caching = {'enabled': 'false'}
-    AND comment = 'publication''s comments'
     AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 17280000;

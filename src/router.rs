@@ -78,12 +78,12 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
         .nest(
             "/v1/publication",
             Router::new()
-                .nest(
-                    "/comment",
-                    Router::new()
-                        .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                        .route("/list", routing::post(todo)),
-                )
+                // .nest(
+                //     "/comment",
+                //     Router::new()
+                //         .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
+                //         .route("/list", routing::post(todo)),
+                // )
                 .route(
                     "/",
                     routing::post(api::publication::create)
@@ -91,11 +91,11 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .patch(api::publication::update)
                         .delete(api::publication::delete),
                 )
-                .route("/list", routing::post(api::publication::list))
                 .route(
-                    "/list_published",
-                    routing::get(api::publication::list_published),
+                    "/publish_list",
+                    routing::get(api::publication::get_publish_list),
                 )
+                .route("/list", routing::post(api::publication::list))
                 .route(
                     "/update_status",
                     routing::patch(api::publication::update_status),

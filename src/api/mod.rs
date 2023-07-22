@@ -1,8 +1,8 @@
 use axum::extract::State;
 
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc};
-use validator::{Validate};
+use std::sync::Arc;
+use validator::Validate;
 
 use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 

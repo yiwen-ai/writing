@@ -306,7 +306,7 @@ pub async fn list(
     }))
 }
 
-pub async fn list_published(
+pub async fn get_publish_list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
@@ -318,7 +318,7 @@ pub async fn list_published(
     let gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
     ctx.set_kvs(vec![
-        ("action", "list_published".into()),
+        ("action", "get_publish_list".into()),
         ("gid", gid.to_string().into()),
         ("cid", cid.to_string().into()),
     ])
