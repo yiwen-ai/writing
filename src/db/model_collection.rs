@@ -21,7 +21,6 @@ pub struct Collection {
     pub updated_at: i64,
     pub genre: Vec<String>,
     pub title: String,
-    pub description: String,
     pub cover: String,
     pub summary: String,
     pub labels: Vec<String>,

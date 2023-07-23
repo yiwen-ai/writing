@@ -27,8 +27,6 @@ pub struct Document {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
@@ -72,7 +70,6 @@ pub struct DocumentOutput {
     pub version: i16,
     pub kind: i8, // 0: creation, 1: publication
     pub title: String,
-    pub description: String,
     pub summary: String,
 }
 
@@ -86,7 +83,6 @@ impl DocumentOutput {
             version: val.version,
             kind: val.kind,
             title: val.title.unwrap_or_default(),
-            description: val.description.unwrap_or_default(),
             summary: val.summary.unwrap_or_default(),
         }
     }
@@ -111,7 +107,6 @@ pub struct SearchOutput {
 //     ],
 //     "searchableAttributes": [
 //         "title",
-//         "description",
 //         "keywords",
 //         "summary"
 //     ],
@@ -122,7 +117,6 @@ pub struct SearchOutput {
 //         "kind",
 //         "version",
 //         "title",
-//         "description",
 //         "summary"
 //     ],
 //     "sortableAttributes": [

@@ -26,7 +26,6 @@ pub struct Publication {
     pub original_url: String,
     pub genre: Vec<String>,
     pub title: String,
-    pub description: String,
     pub cover: String,
     pub keywords: Vec<String>,
     pub authors: Vec<String>,
@@ -50,7 +49,6 @@ impl From<Creation> for Publication {
             original_url: draft.original_url,
             genre: draft.genre,
             title: draft.title,
-            description: draft.description,
             cover: draft.cover,
             keywords: draft.keywords,
             authors: draft.authors,
@@ -158,9 +156,6 @@ impl Publication {
         }
         if !self.title.is_empty() {
             doc.title = Some(self.title.clone());
-        }
-        if !self.description.is_empty() {
-            doc.description = Some(self.description.clone());
         }
         if !self.keywords.is_empty() {
             doc.keywords = Some(self.keywords.clone());
@@ -361,14 +356,7 @@ impl Publication {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec![
-            "model",
-            "title",
-            "description",
-            "cover",
-            "keywords",
-            "summary",
-        ];
+        let valid_fields = vec!["model", "title", "cover", "keywords", "summary"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
@@ -590,9 +578,6 @@ impl Publication {
         doc.authors = src.authors;
         doc.content = content.id;
         doc.license = src.license;
-        if doc.description.is_empty() {
-            doc.description = src.description;
-        }
         if doc.cover.is_empty() {
             doc.cover = src.cover;
         }
@@ -1091,7 +1076,6 @@ mod tests {
             let mut cols = ColumnsMap::new();
             cols.set_as("model", &"GPT-4".to_string());
             cols.set_as("title", &"title 2".to_string());
-            cols.set_as("description", &"description 2".to_string());
             cols.set_as("cover", &"cover 2".to_string());
             cols.set_as("keywords", &vec!["keyword".to_string()]);
             cols.set_as("summary", &"summary 2".to_string());

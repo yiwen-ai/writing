@@ -25,13 +25,11 @@ pub struct CreateCollectionInput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub genre: Option<Vec<String>>,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 4, max = 256))]
     pub title: String,
-    #[validate(length(min = 3, max = 1024))]
-    pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
-    #[validate(length(min = 10, max = 2048))]
+    #[validate(length(min = 0, max = 2048))]
     pub summary: Option<String>,
     pub labels: Option<Vec<String>>,
 }
@@ -54,8 +52,6 @@ pub struct CollectionOutput {
     pub genre: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,7 +77,6 @@ impl CollectionOutput {
                 "updated_at" => rt.updated_at = Some(val.updated_at),
                 "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
-                "description" => rt.description = Some(val.description.to_owned()),
                 "cover" => rt.cover = Some(val.cover.to_owned()),
                 "summary" => rt.summary = Some(val.summary.to_owned()),
                 "labels" => rt.labels = Some(val.labels.to_owned()),
@@ -110,7 +105,6 @@ pub async fn create(
         version: input.version,
         genre: input.genre.unwrap_or_default(),
         title: input.title,
-        description: input.description.unwrap_or_default(),
         cover: input.cover.unwrap_or_default(),
         summary: input.summary.unwrap_or_default(),
         labels: input.labels.unwrap_or_default(),
@@ -201,13 +195,11 @@ pub struct UpdateCollectionInput {
     pub updated_at: i64,
     #[validate(range(min = 1, max = 10000))]
     pub version: Option<i16>,
-    #[validate(length(min = 3, max = 512))]
+    #[validate(length(min = 4, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 3, max = 1024))]
-    pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
-    #[validate(length(min = 10, max = 2048))]
+    #[validate(length(min = 0, max = 2048))]
     pub summary: Option<String>,
     #[validate(length(min = 0, max = 20))]
     pub labels: Option<Vec<String>>,
@@ -221,9 +213,6 @@ impl UpdateCollectionInput {
         }
         if let Some(title) = self.title {
             cols.set_as("title", &title);
-        }
-        if let Some(description) = self.description {
-            cols.set_as("description", &description);
         }
         if let Some(cover) = self.cover {
             cols.set_as("cover", &cover);

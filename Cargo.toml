@@ -1,6 +1,6 @@
 [package]
 name = "writing"
-version = "0.5.6"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.64"
 description = ""
@@ -110,6 +110,7 @@ meilisearch-sdk = "0.24"
 
 [dev-dependencies]
 faster-hex = "0.8"
+hex-literal = "0.4.1"
 
 [profile.release]
 lto = true

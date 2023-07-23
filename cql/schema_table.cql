@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS creation (
     original_url     TEXT,        -- original web url (https://xxxxxxx)
     genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
-    description      TEXT,        -- description
     cover            TEXT,        -- cover url
     keywords         LIST<TEXT>,  -- keywords
     labels           LIST<TEXT>,  -- labels for creation management
@@ -72,7 +71,6 @@ CREATE TABLE IF NOT EXISTS publication (
     original_url TEXT,       -- original web url (https://xxxxxxx)
     genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
-    description  TEXT,       -- description
     cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
     authors      LIST<TEXT>, -- authors
@@ -101,7 +99,6 @@ CREATE TABLE IF NOT EXISTS collection (
     updated_at  BIGINT,      -- update at, unix time with second precision.
     genre       LIST<TEXT>,  -- publication (creation) genre
     title       TEXT,        -- publication title
-    description TEXT,        -- publication description
     cover       TEXT,        -- cover url
     summary     TEXT,        -- publication summary
     labels      LIST<TEXT>,  -- labels for collections management
@@ -128,7 +125,6 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     original_url     TEXT,        -- original web url (https://xxxxxxx)
     genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
-    description      TEXT,        -- description
     cover            TEXT,        -- cover url
     keywords         LIST<TEXT>,  -- keywords
     labels           LIST<TEXT>,  -- labels for creation management
@@ -158,7 +154,6 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
     original_url TEXT,       -- original web url (https://xxxxxxx)
     genre        LIST<TEXT>, -- genre
     title        TEXT,       -- title
-    description  TEXT,       -- description
     cover        TEXT,       -- cover url
     keywords     LIST<TEXT>, -- keywords
     authors      LIST<TEXT>, -- authors
@@ -183,7 +178,6 @@ CREATE TABLE IF NOT EXISTS deleted_collection (
     updated_at  BIGINT,      -- update at, unix time with second precision.
     genre       LIST<TEXT>,  -- publication (creation) genre
     title       TEXT,        -- publication title
-    description TEXT,        -- publication description
     cover       TEXT,        -- cover url
     summary     TEXT,        -- publication summary
     labels      LIST<TEXT>,  -- labels for collections management

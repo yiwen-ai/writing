@@ -26,10 +26,8 @@ pub struct CreateCreationInput {
     #[validate(url)]
     pub original_url: Option<String>,
     pub genre: Option<Vec<String>>,
-    #[validate(length(min = 3, max = 256))]
+    #[validate(length(min = 4, max = 256))]
     pub title: String,
-    #[validate(length(min = 3, max = 512))]
-    pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
     #[validate(length(min = 0, max = 5))]
@@ -38,8 +36,6 @@ pub struct CreateCreationInput {
     pub labels: Option<Vec<String>>,
     #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
-    #[validate(length(min = 10, max = 2048))]
-    pub summary: Option<String>,
     #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
     #[validate(url)]
@@ -70,8 +66,6 @@ pub struct CreationOutput {
     pub genre: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,7 +103,6 @@ impl CreationOutput {
                 "original_url" => rt.original_url = Some(val.original_url.to_owned()),
                 "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
-                "description" => rt.description = Some(val.description.to_owned()),
                 "cover" => rt.cover = Some(val.cover.to_owned()),
                 "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "labels" => rt.labels = Some(val.labels.to_owned()),
@@ -143,12 +136,10 @@ pub async fn create(
         original_url: input.original_url.unwrap_or_default(),
         genre: input.genre.unwrap_or_default(),
         title: input.title,
-        description: input.description.unwrap_or_default(),
         cover: input.cover.unwrap_or_default(),
         keywords: input.keywords.unwrap_or_default(),
         labels: input.labels.unwrap_or_default(),
         authors: input.authors.unwrap_or_default(),
-        summary: input.summary.unwrap_or_default(),
         license: input.license.unwrap_or_default(),
         ..Default::default()
     };
@@ -255,10 +246,8 @@ pub struct UpdateCreationInput {
     pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 256))]
+    #[validate(length(min = 4, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 3, max = 512))]
-    pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
     #[validate(length(min = 0, max = 5))]
@@ -267,7 +256,7 @@ pub struct UpdateCreationInput {
     pub labels: Option<Vec<String>>,
     #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
-    #[validate(length(min = 10, max = 2048))]
+    #[validate(length(min = 64, max = 2048))]
     pub summary: Option<String>,
     #[validate(url)]
     pub license: Option<String>,
@@ -278,9 +267,6 @@ impl UpdateCreationInput {
         let mut cols = ColumnsMap::new();
         if let Some(title) = self.title {
             cols.set_as("title", &title);
-        }
-        if let Some(description) = self.description {
-            cols.set_as("description", &description);
         }
         if let Some(cover) = self.cover {
             cols.set_as("cover", &cover);
@@ -473,4 +459,26 @@ pub async fn delete(
         );
     }
     Ok(to.with(SuccessResponse::new(res)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum_web::object::cbor_from_slice;
+    use hex_literal::hex;
+    use std::str::FromStr;
+
+    #[test]
+    fn create_creation_input_works() {
+        let data = hex!("a4636769644c00000000000000004d5bfcb8657469746c656e6669727374206372656174696f6e67636f6e74656e745859a2647479706563646f6367636f6e74656e7481a3647479706569706172616772617068656174747273a16269646631323334353667636f6e74656e7481a264746578746b48656c6c6f20776f726c6464747970656474657874686c616e677561676563656e67");
+
+        let obj: CreateCreationInput = cbor_from_slice(&data).unwrap();
+        obj.validate().unwrap();
+        assert_eq!(
+            obj.gid.unwrap(),
+            xid::Id::from_str(db::USER_JARVIS).unwrap()
+        );
+        assert_eq!(obj.language.unwrap(), Language::Eng);
+    }
 }

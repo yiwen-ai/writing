@@ -1,6 +1,5 @@
 use isolang::Language;
 use std::{
-    string,
     time::{Duration, SystemTime},
 };
 
@@ -109,7 +108,6 @@ pub struct Creation {
     pub original_url: String,
     pub genre: Vec<String>,
     pub title: String,
-    pub description: String,
     pub cover: String,
     pub keywords: Vec<String>,
     pub labels: Vec<String>,
@@ -170,9 +168,6 @@ impl Creation {
         }
         if !self.title.is_empty() {
             doc.title = Some(self.title.clone());
-        }
-        if !self.description.is_empty() {
-            doc.description = Some(self.description.clone());
         }
         if !self.keywords.is_empty() {
             doc.keywords = Some(self.keywords.clone());
@@ -483,14 +478,7 @@ impl Creation {
         updated_at: i64,
     ) -> anyhow::Result<bool> {
         let valid_fields = vec![
-            "title",
-            "description",
-            "cover",
-            "keywords",
-            "labels",
-            "authors",
-            "summary",
-            "license",
+            "title", "cover", "keywords", "labels", "authors", "summary", "license",
         ];
         let update_fields = cols.keys();
         for field in &update_fields {
@@ -898,7 +886,6 @@ mod tests {
 
             let mut cols = ColumnsMap::new();
             cols.set_as("title", &"title 2".to_string());
-            cols.set_as("description", &"description 2".to_string());
             cols.set_as("cover", &"cover 2".to_string());
             cols.set_as("summary", &"summary 2".to_string());
             cols.set_as("keywords", &vec!["keyword".to_string()]);

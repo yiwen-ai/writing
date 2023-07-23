@@ -13,7 +13,7 @@ use axum_web::context::ReqContext;
 use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 
-use super::{publication, AppState};
+use super::AppState;
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct SearchInput {
@@ -100,11 +100,7 @@ pub async fn original_search(
     let publications = db::Publication::list_published_by_url(
         &app.scylla,
         q.to_string(),
-        vec![
-            "title".to_string(),
-            "description".to_string(),
-            "summary".to_string(),
-        ],
+        vec!["title".to_string(), "summary".to_string()],
     )
     .await?;
 
@@ -116,7 +112,6 @@ pub async fn original_search(
             "version".to_string(),
             "language".to_string(),
             "title".to_string(),
-            "description".to_string(),
             "summary".to_string(),
         ],
     )
@@ -134,7 +129,6 @@ pub async fn original_search(
             version: doc.version,
             kind: 1,
             title: doc.title,
-            description: doc.description,
             summary: doc.summary,
         });
     }
@@ -146,7 +140,6 @@ pub async fn original_search(
             version: doc.version,
             kind: 0,
             title: doc.title,
-            description: doc.description,
             summary: doc.summary,
         });
     }

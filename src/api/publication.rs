@@ -42,8 +42,6 @@ pub struct PublicationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
@@ -78,7 +76,6 @@ impl PublicationOutput {
                 "original_url" => rt.original_url = Some(val.original_url.to_owned()),
                 "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
-                "description" => rt.description = Some(val.description.to_owned()),
                 "cover" => rt.cover = Some(val.cover.to_owned()),
                 "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "authors" => rt.authors = Some(val.authors.to_owned()),
@@ -107,17 +104,15 @@ pub struct CreatePublicationInput {
 pub struct PublicationDraftInput {
     pub gid: PackObject<xid::Id>,
     pub language: PackObject<isolang::Language>,
-    #[validate(length(min = 3, max = 16))]
+    #[validate(length(min = 2, max = 16))]
     pub model: String,
-    #[validate(length(min = 3, max = 256))]
+    #[validate(length(min = 4, max = 256))]
     pub title: String,
-    #[validate(length(min = 0, max = 512))]
-    pub description: String,
     #[validate(url)]
     pub cover: String,
     #[validate(length(min = 0, max = 5))]
     pub keywords: Vec<String>,
-    #[validate(length(min = 0, max = 2048))]
+    #[validate(length(min = 64, max = 2048))]
     pub summary: String,
     #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
@@ -180,7 +175,6 @@ pub async fn create(
                 version: input.version,
                 model: draft.model,
                 title: draft.title,
-                description: draft.description,
                 cover: draft.cover,
                 keywords: draft.keywords,
                 summary: draft.summary,
@@ -417,17 +411,15 @@ pub struct UpdatePublicationInput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub updated_at: i64,
-    #[validate(length(min = 3, max = 16))]
+    #[validate(length(min = 2, max = 16))]
     pub model: Option<String>,
-    #[validate(length(min = 3, max = 256))]
+    #[validate(length(min = 4, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 3, max = 512))]
-    pub description: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
     #[validate(length(min = 0, max = 5))]
     pub keywords: Option<Vec<String>>,
-    #[validate(length(min = 0, max = 2048))]
+    #[validate(length(min = 64, max = 2048))]
     pub summary: Option<String>,
 }
 
@@ -439,9 +431,6 @@ impl UpdatePublicationInput {
         }
         if let Some(title) = self.title {
             cols.set_as("title", &title);
-        }
-        if let Some(description) = self.description {
-            cols.set_as("description", &description);
         }
         if let Some(cover) = self.cover {
             cols.set_as("cover", &cover);
