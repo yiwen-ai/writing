@@ -206,14 +206,7 @@ impl Collection {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec![
-            "version",
-            "title",
-            "description",
-            "cover",
-            "summary",
-            "labels",
-        ];
+        let valid_fields = vec!["version", "title", "cover", "summary", "labels"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
@@ -512,7 +505,6 @@ mod tests {
             let mut cols = ColumnsMap::new();
             cols.set_as("version", &2i16);
             cols.set_as("title", &"title 2".to_string());
-            cols.set_as("description", &"description 2".to_string());
             cols.set_as("cover", &"cover 2".to_string());
             cols.set_as("summary", &"summary 2".to_string());
             cols.set_as("labels", &vec!["label 1".to_string()]);
