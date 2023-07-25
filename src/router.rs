@@ -91,10 +91,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .patch(api::publication::update)
                         .delete(api::publication::delete),
                 )
-                .route(
-                    "/publish_list",
-                    routing::get(api::publication::get_publish_list),
-                )
+                .route("/publish", routing::get(api::publication::get_publish_list))
                 .route("/list", routing::post(api::publication::list))
                 .route(
                     "/update_status",

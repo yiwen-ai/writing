@@ -112,7 +112,7 @@ pub struct PublicationDraftInput {
     pub cover: String,
     #[validate(length(min = 0, max = 5))]
     pub keywords: Vec<String>,
-    #[validate(length(min = 64, max = 2048))]
+    #[validate(length(min = 4, max = 2048))]
     pub summary: String,
     #[validate(custom = "validate_cbor_content")]
     pub content: PackObject<Vec<u8>>,
@@ -419,7 +419,7 @@ pub struct UpdatePublicationInput {
     pub cover: Option<String>,
     #[validate(length(min = 0, max = 5))]
     pub keywords: Option<Vec<String>>,
-    #[validate(length(min = 64, max = 2048))]
+    #[validate(length(min = 4, max = 2048))]
     pub summary: Option<String>,
 }
 

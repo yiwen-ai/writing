@@ -531,7 +531,7 @@ impl Publication {
         content.save(db).await?;
         creation.upgrade_version(db).await?;
 
-        doc._content = content.content;
+        // doc._content = content.content;
         Ok(doc)
     }
 
@@ -611,7 +611,7 @@ impl Publication {
         }
 
         content.save(db).await?;
-        doc._content = content.content;
+        // doc._content = content.content;
 
         Ok(doc)
     }

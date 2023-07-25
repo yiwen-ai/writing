@@ -256,7 +256,7 @@ pub struct UpdateCreationInput {
     pub labels: Option<Vec<String>>,
     #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
-    #[validate(length(min = 64, max = 2048))]
+    #[validate(length(min = 4, max = 2048))]
     pub summary: Option<String>,
     #[validate(url)]
     pub license: Option<String>,
