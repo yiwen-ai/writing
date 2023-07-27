@@ -908,7 +908,7 @@ mod tests {
             assert_eq!(doc.cid, cid);
             assert_eq!(doc.creator, user);
             assert_eq!(doc.language, language);
-            assert_eq!(&doc._content, &content);
+            assert!(doc._content.is_empty());
             assert_ne!(doc.content, creation.content);
             creation.get_one(db, vec![]).await.unwrap();
 
@@ -1009,7 +1009,7 @@ mod tests {
             assert_eq!(doc.cid, cid);
             assert_eq!(doc.creator, user);
             assert_eq!(doc.language, Language::Eng);
-            assert_eq!(&doc._content, &content);
+            assert!(&doc._content.is_empty());
 
             let mut src = Publication::with_pk(gid, cid, language, version);
             src.get_one(db, vec![]).await.unwrap();

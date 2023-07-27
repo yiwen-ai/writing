@@ -33,14 +33,15 @@ pub async fn search(
 
     let gid = input.gid.to_owned().map(|v| v.unwrap());
     let lang = input.language.to_owned().map(|v| v.unwrap());
-    let q = input.q.trim();
+    let q: Vec<&str> = input.q.split_whitespace().into_iter().collect();
+    let q = q.join(" ");
 
-    ctx.set_kvs(vec![("action", "search".into()), ("q", q.into())])
+    ctx.set_kvs(vec![("action", "search".into()), ("q", q.as_str().into())])
         .await;
 
     let res = app
         .meili
-        .search(meili::Space::Pub(gid), lang, q, &to)
+        .search(meili::Space::Pub(gid), lang, &q, &to)
         .await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
