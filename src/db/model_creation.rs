@@ -1,7 +1,5 @@
 use isolang::Language;
-use std::{
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -142,8 +140,13 @@ impl Creation {
             }
         }
 
+        let mut select_fields = select_fields;
+        let language = "language".to_string(); // language 字段在 meilisearch 中用作 PK，必须存在
+        if !select_fields.contains(&language) {
+            select_fields.push(language);
+        }
+
         if with_pk {
-            let mut select_fields = select_fields;
             let gid = "gid".to_string();
             if !select_fields.contains(&gid) {
                 select_fields.push(gid);
@@ -152,7 +155,6 @@ impl Creation {
             if !select_fields.contains(&id) {
                 select_fields.push(id);
             }
-            return Ok(select_fields);
         }
 
         Ok(select_fields)
@@ -857,8 +859,8 @@ mod tests {
                 .unwrap();
             assert_eq!(doc3.title.as_str(), "Hello World");
             assert_eq!(doc3.version, 0);
-            assert_eq!(doc3.language, Language::default());
-            assert_eq!(doc3._fields, vec!["gid", "title"]);
+            assert_eq!(doc3.language, Language::Eng);
+            assert_eq!(doc3._fields, vec!["gid", "title", "language"]);
             assert!(doc3._content.is_empty());
         }
 

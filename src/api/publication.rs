@@ -476,25 +476,28 @@ pub async fn update(
     let updated_at = input.updated_at;
     let cols = input.into()?;
 
+    let update_meili = cols.has("title") || cols.has("summary") || cols.has("keywords");
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
 
-    let meili_start = ctx.start.elapsed().as_millis() as u64;
-    if let Err(err) = app
-        .meili
-        .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-        .await
-    {
-        log::error!(target: "meilisearch",
-            action = "add_or_update",
-            space = "group",
-            rid = ctx.rid,
-            gid = doc.gid.to_string(),
-            cid = doc.cid.to_string(),
-            kind = 1i8,
-            elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
-            "{}", err.to_string(),
-        );
+    if update_meili {
+        let meili_start = ctx.start.elapsed().as_millis() as u64;
+        if let Err(err) = app
+            .meili
+            .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+            .await
+        {
+            log::error!(target: "meilisearch",
+                action = "add_or_update",
+                space = "group",
+                rid = ctx.rid,
+                gid = doc.gid.to_string(),
+                cid = doc.cid.to_string(),
+                kind = 1i8,
+                elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+                "{}", err.to_string(),
+            );
+        }
     }
 
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
