@@ -300,6 +300,49 @@ pub async fn list(
     }))
 }
 
+#[derive(Debug, Deserialize, Validate)]
+pub struct GidsPagination {
+    pub gids: Vec<PackObject<xid::Id>>,
+    pub page_token: Option<PackObject<Vec<u8>>>,
+    #[validate(range(min = 2, max = 1000))]
+    pub page_size: Option<u16>,
+    pub fields: Option<Vec<String>>,
+}
+
+pub async fn list_by_gids(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<GidsPagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    ctx.set_kvs(vec![
+        ("action", "list_publications_by_gids".into()),
+        ("gids", input.gids.len().into()),
+    ])
+    .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let (res, next_page_token) = db::Publication::list_by_gids(
+        &app.scylla,
+        input.gids.into_iter().map(|v| v.unwrap()).collect(),
+        fields,
+        token_to_xid(&input.page_token),
+    )
+    .await?;
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: to.with_option(token_from_xid(next_page_token)),
+        result: res
+            .iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
 pub async fn get_publish_list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,

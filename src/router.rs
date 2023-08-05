@@ -94,6 +94,10 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/publish", routing::get(api::publication::get_publish_list))
                 .route("/list", routing::post(api::publication::list))
                 .route(
+                    "/list_by_gids",
+                    routing::post(api::publication::list_by_gids),
+                )
+                .route(
                     "/update_status",
                     routing::patch(api::publication::update_status),
                 )

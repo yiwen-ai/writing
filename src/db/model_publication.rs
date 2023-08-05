@@ -7,7 +7,7 @@ use scylla_orm_macros::CqlOrm;
 use crate::db::{
     meili,
     scylladb::{self, extract_applied, Query},
-    Content, Creation,
+    Content, Creation, DEFAULT_MODEL,
 };
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -502,6 +502,7 @@ impl Publication {
         doc.updated_at = content.updated_at;
         doc.content = content.id;
         doc.creator = creator;
+        doc.model = DEFAULT_MODEL.to_string();
 
         let fields = Self::fields();
         doc._fields = fields.clone();
@@ -681,6 +682,66 @@ impl Publication {
         }
 
         Ok(res)
+    }
+
+    pub async fn list_by_gids(
+        db: &scylladb::ScyllaDB,
+        gids: Vec<xid::Id>,
+        select_fields: Vec<String>,
+        page_token: Option<xid::Id>,
+    ) -> anyhow::Result<(Vec<Publication>, xid::Id)> {
+        let fields = Self::select_fields(select_fields, true)?;
+
+        let secs: u32 = 3600 * 48;
+        let query_size: i32 = match gids.len() {
+            v if v <= 20 => 4,
+            v if v <= 50 => 3,
+            v if v <= 100 => 2,
+            _ => 1,
+        };
+
+        let mut res: Vec<Publication> = Vec::with_capacity(gids.len() * 2);
+
+        let (start_id, end_id) = if let Some(cid) = page_token {
+            let raw = cid.as_bytes();
+            let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
+            let mut start_id = xid::Id::default();
+            start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
+            (start_id, cid)
+        } else {
+            // from 1 days ago
+            let unix_ts = (unix_ms() / 1000) as u32;
+            let mut start_id = xid::Id::default();
+            let mut end_id = xid::Id::default();
+            start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
+            end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
+            (start_id, end_id)
+        };
+
+        for gid in gids {
+            let query = Query::new(format!(
+                    "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    fields.clone().join(","))).with_page_size(query_size);
+            let params = (
+                gid.to_cql(),
+                2i8,
+                start_id.to_cql(),
+                end_id.to_cql(),
+                query_size,
+            );
+            let rows = db.execute_paged(query, params, None).await?;
+            for row in rows {
+                let mut doc = Publication::default();
+                let mut cols = ColumnsMap::with_capacity(fields.len());
+                cols.fill(row, &fields)?;
+                doc.fill(&cols);
+                doc._fields = fields.clone();
+                res.push(doc);
+            }
+        }
+
+        res.sort_by(|a, b| b.updated_at.partial_cmp(&a.updated_at).unwrap());
+        Ok((res, start_id))
     }
 
     pub async fn list_by_gid_cid(
