@@ -616,7 +616,7 @@ impl Creation {
         let rows = if let Some(id) = page_token {
             if status.is_none() {
                 let query = Query::new(format!(
-                "SELECT {} FROM creation WHERE gid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM creation WHERE gid=? AND id<? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","))).with_page_size(page_size as i32);
                 let params = (gid.to_cql(), id.to_cql(), page_size as i32);
                 db.execute_paged(query, params, None).await?
@@ -629,7 +629,7 @@ impl Creation {
             }
         } else if status.is_none() {
             let query = Query::new(format!(
-                "SELECT {} FROM creation WHERE gid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM creation WHERE gid=? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
             ))
             .with_page_size(page_size as i32);

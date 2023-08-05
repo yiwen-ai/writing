@@ -638,7 +638,7 @@ impl Publication {
             let rows = if let Some(cid) = page_token {
                 if status.is_none() {
                     let query = Query::new(format!(
-                "SELECT {} FROM publication WHERE gid=? AND cid<? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","))).with_page_size(query_size);
                     let params = (gid.to_cql(), cid.to_cql(), query_size);
                     db.execute_paged(query, params, None).await?
@@ -650,9 +650,12 @@ impl Publication {
                     db.execute_paged(query, params, None).await?
                 }
             } else if status.is_none() {
-                let query = Query::new(format!(
-                "SELECT {} FROM publication WHERE gid=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","))).with_page_size(query_size);
+                let query = format!(
+                    "SELECT {} FROM publication WHERE gid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                    fields.clone().join(","));
+                println!("query: {}", query);
+                let query = Query::new(query).with_page_size(query_size);
+
                 let params = (gid.to_cql(), query_size);
                 db.execute_iter(query, params).await?
             } else {
@@ -756,7 +759,7 @@ impl Publication {
 
         let rows = if status.is_none() {
             let query = Query::new(format!(
-                "SELECT {} FROM publication WHERE gid=? AND cid=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
             ))
             .with_page_size(query_size);
