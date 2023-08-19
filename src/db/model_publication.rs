@@ -846,6 +846,16 @@ impl Publication {
 
         Ok(res)
     }
+
+    pub async fn list_published_by_gid(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+    ) -> anyhow::Result<usize> {
+        let query = "SELECT cid FROM publication WHERE gid=? AND status=? GROUP BY cid BYPASS CACHE USING TIMEOUT 3s";
+        let params = (gid.to_cql(), 2i8);
+        let rows = db.execute_iter(query, params).await?;
+        Ok(rows.len())
+    }
 }
 
 #[cfg(test)]

@@ -379,6 +379,26 @@ pub async fn get_publish_list(
     )))
 }
 
+pub async fn count_publish(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<usize>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = input.gid.unwrap();
+    ctx.set_kvs(vec![
+        ("action", "count_publish".into()),
+        ("gid", gid.to_string().into()),
+    ])
+    .await;
+
+    let res = db::Publication::list_published_by_gid(&app.scylla, gid).await?;
+    Ok(to.with(SuccessResponse::new(res)))
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdatePublicationStatusInput {
     pub gid: PackObject<xid::Id>,

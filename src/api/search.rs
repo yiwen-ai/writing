@@ -33,7 +33,7 @@ pub async fn search(
 
     let gid = input.gid.to_owned().map(|v| v.unwrap());
     let lang = input.language.to_owned().map(|v| v.unwrap());
-    let q: Vec<&str> = input.q.split_whitespace().into_iter().collect();
+    let q: Vec<&str> = input.q.split_whitespace().collect();
     let q = q.join(" ");
 
     ctx.set_kvs(vec![("action", "search".into()), ("q", q.as_str().into())])
