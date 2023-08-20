@@ -59,24 +59,25 @@ CREATE INDEX creation_gid_url ON creation ((gid), original_url);
 CREATE INDEX creation_gid_status ON creation ((gid), status);
 
 CREATE TABLE IF NOT EXISTS publication (
-    gid          BLOB,       -- group id, publication belong to
-    cid          BLOB,       -- creation id
-    language     TEXT,       -- publication's language, ISO 639-3
-    version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
-    creator      BLOB,       -- user id who create the publication.
-    created_at   BIGINT,     -- create at
-    updated_at   BIGINT,     -- update at
-    model        TEXT,       -- AI model name, default to empty
-    original_url TEXT,       -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,       -- title
-    cover        TEXT,       -- cover url
-    keywords     LIST<TEXT>, -- keywords
-    authors      LIST<TEXT>, -- authors
-    summary      TEXT,       -- summary
-    content      BLOB,       -- content id, xid
-    license      TEXT,       -- license url
+    gid           BLOB,       -- group id, publication belong to
+    cid           BLOB,       -- creation id
+    language      TEXT,       -- publication's language, ISO 639-3
+    version       SMALLINT,   -- creation version
+    status        TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
+    creator       BLOB,       -- user id who create the publication.
+    created_at    BIGINT,     -- create at
+    updated_at    BIGINT,     -- update at
+    model         TEXT,       -- AI model name, default to empty
+    original_url  TEXT,       -- original web url (https://xxxxxxx)
+    from_language TEXT,       -- translate from
+    genre         LIST<TEXT>, -- genre
+    title         TEXT,       -- title
+    cover         TEXT,       -- cover url
+    keywords      LIST<TEXT>, -- keywords
+    authors       LIST<TEXT>, -- authors
+    summary       TEXT,       -- summary
+    content       BLOB,       -- content id, xid
+    license       TEXT,       -- license url
     PRIMARY KEY (gid, cid, language, version)
 ) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'true'}
@@ -121,7 +122,6 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     creator          BLOB,        -- user id who create the creation.
     created_at       BIGINT,      -- create at, unix time, ms
     updated_at       BIGINT,      -- update at
-    active_languages SET<TEXT>,   -- active languages by translation, ISO 639-3
     original_url     TEXT,        -- original web url (https://xxxxxxx)
     genre            LIST<TEXT>,  -- genre
     title            TEXT,        -- title
@@ -142,24 +142,25 @@ CREATE TABLE IF NOT EXISTS deleted_creation (
     AND default_time_to_live = 17280000; -- 60*60*24*200, 17280000, 200 days，安全要求应该大于半年
 
 CREATE TABLE IF NOT EXISTS deleted_publication (
-    gid          BLOB,       -- group id, publication belong to
-    cid          BLOB,       -- creation id
-    language     TEXT,       -- publication's language, ISO 639-3
-    version      SMALLINT,   -- creation version
-    status       TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
-    creator      BLOB,       -- user id who create the publication.
-    created_at   BIGINT,     -- create at
-    updated_at   BIGINT,     -- update at
-    model        TEXT,       -- AI model name, default to empty
-    original_url TEXT,       -- original web url (https://xxxxxxx)
-    genre        LIST<TEXT>, -- genre
-    title        TEXT,       -- title
-    cover        TEXT,       -- cover url
-    keywords     LIST<TEXT>, -- keywords
-    authors      LIST<TEXT>, -- authors
-    summary      TEXT,       -- summary
-    content      BLOB,       -- content id, xid
-    license      TEXT,       -- license url
+    gid           BLOB,       -- group id, publication belong to
+    cid           BLOB,       -- creation id
+    language      TEXT,       -- publication's language, ISO 639-3
+    version       SMALLINT,   -- creation version
+    status        TINYINT,    -- int8, -1: Rejected, 0: Review, 1: Approved, 2: Published
+    creator       BLOB,       -- user id who create the publication.
+    created_at    BIGINT,     -- create at
+    updated_at    BIGINT,     -- update at
+    model         TEXT,       -- AI model name, default to empty
+    original_url  TEXT,       -- original web url (https://xxxxxxx)
+    from_language TEXT,       -- translate from
+    genre         LIST<TEXT>, -- genre
+    title         TEXT,       -- title
+    cover         TEXT,       -- cover url
+    keywords      LIST<TEXT>, -- keywords
+    authors       LIST<TEXT>, -- authors
+    summary       TEXT,       -- summary
+    content       BLOB,       -- content id, xid
+    license       TEXT,       -- license url
     PRIMARY KEY (gid, cid, language, version)
 ) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'false'}

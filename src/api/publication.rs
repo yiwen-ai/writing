@@ -38,6 +38,8 @@ pub struct PublicationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -74,6 +76,9 @@ impl PublicationOutput {
                 "updated_at" => rt.updated_at = Some(val.updated_at),
                 "model" => rt.model = Some(val.model.to_owned()),
                 "original_url" => rt.original_url = Some(val.original_url.to_owned()),
+                "from_language" => {
+                    rt.from_language = Some(val.from_language.to_639_3().to_string())
+                }
                 "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
                 "cover" => rt.cover = Some(val.cover.to_owned()),

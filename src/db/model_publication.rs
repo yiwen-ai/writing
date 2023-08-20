@@ -24,6 +24,7 @@ pub struct Publication {
     pub updated_at: i64,
     pub model: String,
     pub original_url: String,
+    pub from_language: Language,
     pub genre: Vec<String>,
     pub title: String,
     pub cover: String,
@@ -47,6 +48,7 @@ impl From<Creation> for Publication {
             version: draft.version,
             creator: draft.creator,
             original_url: draft.original_url,
+            from_language: draft.language,
             genre: draft.genre,
             title: draft.title,
             cover: draft.cover,
@@ -575,6 +577,7 @@ impl Publication {
         doc.created_at = content.updated_at;
         doc.updated_at = content.updated_at;
         doc.original_url = src.original_url;
+        doc.from_language = src.language;
         doc.genre = src.genre;
         doc.authors = src.authors;
         doc.content = content.id;
