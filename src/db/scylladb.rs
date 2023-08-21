@@ -76,20 +76,6 @@ impl ScyllaDB {
         Ok(rows)
     }
 
-    pub async fn execute_paged(
-        &self,
-        query: impl Into<Query>,
-        params: impl ValueList,
-        paging_state: Option<Bytes>,
-    ) -> anyhow::Result<Vec<Row>> {
-        let res = self
-            .session
-            .execute_paged(query, params, paging_state)
-            .await?;
-
-        Ok(res.rows.unwrap_or_default())
-    }
-
     // https://opensource.docs.scylladb.com/master/cql/dml.html#batch-statement
     // BATCH operations are only isolated within a single partition.
     // BATCH with conditions cannot span multiple tables

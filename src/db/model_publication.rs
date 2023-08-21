@@ -6,7 +6,7 @@ use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
     meili,
-    scylladb::{self, extract_applied, Query},
+    scylladb::{self, extract_applied},
     Content, Creation, DEFAULT_MODEL,
 };
 use axum_web::context::unix_ms;
@@ -640,31 +640,29 @@ impl Publication {
         'label: loop {
             let rows = if let Some(cid) = page_token {
                 if status.is_none() {
-                    let query = Query::new(format!(
+                    let query = format!(
                 "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","))).with_page_size(query_size);
+                fields.clone().join(","));
                     let params = (gid.to_cql(), cid.to_cql(), query_size);
-                    db.execute_paged(query, params, None).await?
+                    db.execute_iter(query, params).await?
                 } else {
-                    let query = Query::new(format!(
+                    let query = format!(
                     "SELECT {} FROM publication WHERE gid=? AND cid<? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","))).with_page_size(query_size);
+                    fields.clone().join(","));
                     let params = (gid.to_cql(), cid.to_cql(), status.unwrap(), query_size);
-                    db.execute_paged(query, params, None).await?
+                    db.execute_iter(query, params).await?
                 }
             } else if status.is_none() {
                 let query = format!(
                     "SELECT {} FROM publication WHERE gid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","));
-                println!("query: {}", query);
-                let query = Query::new(query).with_page_size(query_size);
 
                 let params = (gid.to_cql(), query_size);
                 db.execute_iter(query, params).await?
             } else {
-                let query = Query::new(format!(
+                let query = format!(
                 "SELECT {} FROM publication WHERE gid=? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","))).with_page_size(query_size);
+                fields.clone().join(","));
                 let params = (gid.to_cql(), status.unwrap(), query_size);
                 db.execute_iter(query, params).await?
             };
@@ -725,9 +723,9 @@ impl Publication {
         };
 
         for gid in gids {
-            let query = Query::new(format!(
+            let query = format!(
                     "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","))).with_page_size(query_size);
+                    fields.clone().join(","));
             let params = (
                 gid.to_cql(),
                 2i8,
@@ -735,7 +733,7 @@ impl Publication {
                 end_id.to_cql(),
                 query_size,
             );
-            let rows = db.execute_paged(query, params, None).await?;
+            let rows = db.execute_iter(query, params).await?;
             for row in rows {
                 let mut doc = Publication::default();
                 let mut cols = ColumnsMap::with_capacity(fields.len());
@@ -761,18 +759,17 @@ impl Publication {
         let query_size = 1000i32;
 
         let rows = if status.is_none() {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            ))
-            .with_page_size(query_size);
+            );
             let params = (gid.to_cql(), cid.to_cql(), query_size);
             db.execute_iter(query, params).await?
         } else {
-            let query = Query::new(format!(
+            let query = format!(
                 "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(",")
-            )).with_page_size(query_size);
+            );
             let params = (gid.to_cql(), cid.to_cql(), status.unwrap(), query_size);
             db.execute_iter(query, params).await?
         };
@@ -797,11 +794,11 @@ impl Publication {
         let fields = Self::select_fields(vec!["status".to_string()], true)?;
         let query_size = 1000i32;
 
-        let query = Query::new(format!(
+        let query = format!(
             "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-            fields.clone().join(","))).with_page_size(query_size);
+            fields.clone().join(","));
         let params = (cid.to_cql(), 2i8, query_size);
-        let rows = db.execute_paged(query, params, None).await?;
+        let rows = db.execute_iter(query, params).await?;
 
         let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
         for row in rows {
