@@ -3,6 +3,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use isolang::Language;
 use serde_json::Value;
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Instant};
 use tokio::sync::RwLock;
@@ -16,17 +17,19 @@ pub struct ReqContext {
     pub rating: i8,    // from x-auth-user-rating header, 0 if not present
     pub unix_ms: u64,
     pub start: Instant,
+    pub language: Option<Language>,
     pub kv: RwLock<BTreeMap<String, Value>>,
 }
 
 impl ReqContext {
-    pub fn new(rid: &str, user: xid::Id, rating: i8) -> Self {
+    pub fn new(rid: &str, user: xid::Id, rating: i8, lang: Option<Language>) -> Self {
         Self {
             rid: rid.to_string(),
             user,
             rating,
             unix_ms: unix_ms(),
             start: Instant::now(),
+            language: lang,
             kv: RwLock::new(BTreeMap::new()),
         }
     }
@@ -53,9 +56,16 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let rating = extract_header(req.headers(), "x-auth-user-rating", || "0".to_string());
     let rating = i8::from_str(&rating).unwrap_or(0);
 
+    let lang = extract_header(req.headers(), "x-language", || "".to_string());
+    let lang = if lang.is_empty() {
+        None
+    } else {
+        Language::from_str(&lang.to_lowercase()).ok()
+    };
+
     let uid = xid::Id::from_str(&user).unwrap_or_default();
 
-    let ctx = Arc::new(ReqContext::new(&rid, uid, rating));
+    let ctx = Arc::new(ReqContext::new(&rid, uid, rating, lang));
     req.extensions_mut().insert(ctx.clone());
 
     let res = next.run(req).await;
@@ -77,6 +87,7 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         rating = rating,
         status = status,
         start = ctx.unix_ms,
+        language = ctx.language.map_or("".to_string(), |l| l.to_string()),
         elapsed = ctx.start.elapsed().as_millis() as u64,
         ctype = ct,
         encoding = ce,

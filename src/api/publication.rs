@@ -286,6 +286,7 @@ pub async fn list(
         page_size,
         token_to_xid(&input.page_token),
         input.status,
+        ctx.language,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
@@ -400,7 +401,7 @@ pub async fn count_publish(
     ])
     .await;
 
-    let res = db::Publication::list_published_by_gid(&app.scylla, gid).await?;
+    let res = db::Publication::count_published_by_gid(&app.scylla, gid).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
 

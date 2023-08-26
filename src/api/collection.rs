@@ -40,17 +40,9 @@ pub struct CollectionOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<i8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub genre: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cover: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<Vec<String>>,
 }
