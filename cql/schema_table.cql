@@ -93,15 +93,12 @@ CREATE INDEX publication_gid_status ON publication ((gid), status);
 CREATE TABLE IF NOT EXISTS collection (
     uid         BLOB,        -- user id who create the collection, 12 bytes XID
     id          BLOB,        -- collection id, 12 bytes XID
-    cid         BLOB,        -- creation id, 12 bytes XID
-    language    TEXT,        -- creation language
-    version     SMALLINT,    -- creation version
-    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
+    cid         BLOB,        -- publication id, 12 bytes XID
+    gid         BLOB,        -- group id, publication belong to
+    language    TEXT,        -- publication language
+    version     SMALLINT,    -- publication version
     updated_at  BIGINT,      -- update at, unix time with second precision.
-    genre       LIST<TEXT>,  -- publication (creation) genre
     title       TEXT,        -- publication title
-    cover       TEXT,        -- cover url
-    summary     TEXT,        -- publication summary
     labels      LIST<TEXT>,  -- labels for collections management
     PRIMARY KEY (uid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
@@ -111,7 +108,7 @@ CREATE TABLE IF NOT EXISTS collection (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX collection_uid_status ON collection ((uid), status);
+CREATE INDEX collection_uid_cid ON collection ((uid), cid);
 
 CREATE TABLE IF NOT EXISTS deleted_creation (
     gid              BLOB,        -- group id, creation belong to
@@ -165,27 +162,6 @@ CREATE TABLE IF NOT EXISTS deleted_publication (
 ) WITH CLUSTERING ORDER BY (cid DESC, language ASC, version DESC)
     AND caching = {'enabled': 'false'}
     AND comment = 'publications'
-    AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 17280000;
-
-CREATE TABLE IF NOT EXISTS deleted_collection (
-    uid         BLOB,        -- user id who create the collection, 12 bytes XID
-    id          BLOB,        -- collection id, 12 bytes XID
-    cid         BLOB,        -- creation id, 12 bytes XID
-    language    TEXT,        -- creation language
-    version     SMALLINT,    -- creation version
-    status      TINYINT,     -- int8, -1: Archived, 0: Normal, 1: Preferred, 2: Pinned
-    updated_at  BIGINT,      -- update at, unix time with second precision.
-    genre       LIST<TEXT>,  -- publication (creation) genre
-    title       TEXT,        -- publication title
-    cover       TEXT,        -- cover url
-    summary     TEXT,        -- publication summary
-    labels      LIST<TEXT>,  -- labels for collections management
-    PRIMARY KEY (uid, id)
-) WITH CLUSTERING ORDER BY (id DESC)
-    AND  caching = {'enabled': 'false'}
-    AND comment = 'user''s collections'
     AND compaction = {'class': 'TimeWindowCompactionStrategy', 'compaction_window_size': 10}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 17280000;

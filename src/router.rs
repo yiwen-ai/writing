@@ -120,11 +120,8 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .patch(api::collection::update)
                         .delete(api::collection::delete),
                 )
-                .route("/list", routing::post(api::collection::list))
-                .route(
-                    "/update_status",
-                    routing::patch(api::collection::update_status),
-                ),
+                .route("/by_cid", routing::get(api::collection::get_by_cid))
+                .route("/list", routing::post(api::collection::list)),
         )
         .nest(
             "/v1/sys",

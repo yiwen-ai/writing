@@ -15,7 +15,7 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use super::{
-    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, Pagination,
+    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
     QueryGidId, UpdateStatusInput,
 };
 
@@ -201,7 +201,7 @@ pub async fn get(
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
+    to: PackObject<GIDPagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<CreationOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;

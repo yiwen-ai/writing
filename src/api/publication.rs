@@ -13,7 +13,7 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use crate::api::{
-    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, Pagination,
+    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
     QueryGidCid,
 };
 use crate::db::{self, meili};
@@ -263,7 +263,7 @@ pub async fn get(
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
+    to: PackObject<GIDPagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
@@ -387,7 +387,7 @@ pub async fn get_publish_list(
 pub async fn count_publish(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<Pagination>,
+    to: PackObject<GIDPagination>,
 ) -> Result<PackObject<SuccessResponse<usize>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;

@@ -14,23 +14,18 @@ use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{
-    get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryId, UpdateStatusInput,
-};
+use super::{get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryCid, QueryId};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateCollectionInput {
+    pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
-    pub genre: Option<Vec<String>>,
     #[validate(length(min = 4, max = 256))]
     pub title: String,
-    #[validate(url)]
-    pub cover: Option<String>,
-    #[validate(length(min = 0, max = 2048))]
-    pub summary: Option<String>,
+    #[validate(length(min = 0, max = 5))]
     pub labels: Option<Vec<String>>,
 }
 
@@ -38,8 +33,8 @@ pub struct CreateCollectionInput {
 pub struct CollectionOutput {
     pub uid: PackObject<xid::Id>,
     pub id: PackObject<xid::Id>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cid: Option<PackObject<xid::Id>>,
+    pub gid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<PackObject<Language>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,20 +60,17 @@ impl CollectionOutput {
         let mut rt = Self {
             uid: to.with(val.uid),
             id: to.with(val.id),
+            gid: to.with(val.gid),
+            cid: to.with(val.cid),
             ..Default::default()
         };
 
         for v in val._fields {
             match v.as_str() {
-                "cid" => rt.cid = Some(to.with(val.cid)),
                 "language" => rt.language = Some(to.with(val.language)),
                 "version" => rt.version = Some(val.version),
-                "status" => rt.status = Some(val.status),
                 "updated_at" => rt.updated_at = Some(val.updated_at),
-                "genre" => rt.genre = Some(val.genre.to_owned()),
                 "title" => rt.title = Some(val.title.to_owned()),
-                "cover" => rt.cover = Some(val.cover.to_owned()),
-                "summary" => rt.summary = Some(val.summary.to_owned()),
                 "labels" => rt.labels = Some(val.labels.to_owned()),
                 _ => {}
             }
@@ -97,22 +89,64 @@ pub async fn create(
     input.validate()?;
     valid_user(ctx.user)?;
 
+    let cid = input.cid.unwrap();
+    let gid = input.gid.unwrap();
+    let language = input.language.unwrap();
+    let res =
+        db::Collection::get_one_by_cid(&app.scylla, ctx.user, cid, gid, language, vec![]).await;
+
+    if let Ok(mut doc) = res {
+        ctx.set_kvs(vec![
+            ("action", "create_collection".into()),
+            ("id", doc.id.to_string().into()),
+            ("gid", doc.gid.to_string().into()),
+            ("cid", doc.cid.to_string().into()),
+            ("language", doc.language.to_name().into()),
+            ("version", input.version.into()),
+            ("created", false.into()),
+        ])
+        .await;
+
+        if doc.version >= input.version {
+            return Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))));
+        }
+
+        let updated_at = doc.updated_at;
+        let cols = UpdateCollectionInput {
+            id: to.with(doc.id),
+            updated_at,
+            version: Some(input.version),
+            title: Some(input.title),
+            labels: input.labels,
+        }
+        .into()?;
+        ctx.set_kvs(vec![
+            ("action", "update_collection".into()),
+            ("id", doc.id.to_string().into()),
+        ])
+        .await;
+
+        let ok = doc.update(&app.scylla, cols, updated_at).await?;
+        ctx.set("updated", ok.into()).await;
+        return Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))));
+    }
+
     let mut doc = db::Collection {
         uid: ctx.user,
         id: xid::new(),
-        cid: input.cid.unwrap(),
-        language: input.language.unwrap(),
+        gid: gid,
+        cid: cid,
+        language: language,
         version: input.version,
-        genre: input.genre.unwrap_or_default(),
         title: input.title,
-        cover: input.cover.unwrap_or_default(),
-        summary: input.summary.unwrap_or_default(),
         labels: input.labels.unwrap_or_default(),
         ..Default::default()
     };
+
     ctx.set_kvs(vec![
         ("action", "create_collection".into()),
         ("id", doc.id.to_string().into()),
+        ("gid", doc.gid.to_string().into()),
         ("cid", doc.cid.to_string().into()),
         ("language", doc.language.to_name().into()),
         ("version", doc.version.into()),
@@ -164,13 +198,12 @@ pub async fn list(
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let res = db::Collection::find(
+    let res = db::Collection::list(
         &app.scylla,
         ctx.user,
         fields,
         page_size,
         token_to_xid(&input.page_token),
-        input.status,
     )
     .await?;
     let next_page_token = if res.len() >= page_size as usize {
@@ -189,6 +222,37 @@ pub async fn list(
     }))
 }
 
+pub async fn get_by_cid(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryCid>,
+) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let cid = *input.cid.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "get_collection_by_cid".into()),
+        ("cid", cid.to_string().into()),
+    ])
+    .await;
+
+    let res =
+        db::Collection::list_by_cid(&app.scylla, ctx.user, cid, get_fields(input.fields.clone()))
+            .await?;
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: None,
+        result: res
+            .iter()
+            .map(|r| CollectionOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateCollectionInput {
     pub id: PackObject<xid::Id>,
@@ -197,10 +261,6 @@ pub struct UpdateCollectionInput {
     pub version: Option<i16>,
     #[validate(length(min = 4, max = 256))]
     pub title: Option<String>,
-    #[validate(url)]
-    pub cover: Option<String>,
-    #[validate(length(min = 0, max = 2048))]
-    pub summary: Option<String>,
     #[validate(length(min = 0, max = 20))]
     pub labels: Option<Vec<String>>,
 }
@@ -213,12 +273,6 @@ impl UpdateCollectionInput {
         }
         if let Some(title) = self.title {
             cols.set_as("title", &title);
-        }
-        if let Some(cover) = self.cover {
-            cols.set_as("cover", &cover);
-        }
-        if let Some(summary) = self.summary {
-            cols.set_as("summary", &summary);
         }
         if let Some(labels) = self.labels {
             cols.set_as("labels", &labels);
@@ -246,7 +300,7 @@ pub async fn update(
     let updated_at = input.updated_at;
     let cols = input.into()?;
     ctx.set_kvs(vec![
-        ("action", "update_creation".into()),
+        ("action", "update_collection".into()),
         ("id", doc.id.to_string().into()),
     ])
     .await;
@@ -254,37 +308,6 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
-    Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
-}
-
-pub async fn update_status(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<UpdateStatusInput>,
-) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let gid = input
-        .gid
-        .ok_or_else(|| HTTPError::new(400, "Missing required field `gid`".to_string()))?;
-
-    let id = *input.id.to_owned();
-    let gid = *gid.to_owned();
-    let mut doc = db::Collection::with_pk(gid, id);
-    ctx.set_kvs(vec![
-        ("action", "update_status".into()),
-        ("id", doc.id.to_string().into()),
-    ])
-    .await;
-
-    let ok = doc
-        .update_status(&app.scylla, input.status, input.updated_at)
-        .await?;
-    ctx.set("updated", ok.into()).await;
-
-    doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
 }
 
