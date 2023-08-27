@@ -361,10 +361,12 @@ pub async fn get_publish_list(
 
     let gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
+    let status = input.status.unwrap_or(2);
     ctx.set_kvs(vec![
         ("action", "get_publish_list".into()),
         ("gid", gid.to_string().into()),
         ("cid", cid.to_string().into()),
+        ("status", status.into()),
     ])
     .await;
 
@@ -376,7 +378,7 @@ pub async fn get_publish_list(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let docs = db::Publication::list_published_by_cid(&app.scylla, cid).await?;
+    let docs = db::Publication::list_published_by_cid(&app.scylla, cid, status).await?;
 
     ctx.set("total_size", docs.len().into()).await;
     Ok(to.with(SuccessResponse::new(

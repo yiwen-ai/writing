@@ -91,6 +91,7 @@ pub struct QueryGidId {
 pub struct QueryGidCid {
     pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
+    pub status: Option<i8>,
     pub fields: Option<String>,
 }
 

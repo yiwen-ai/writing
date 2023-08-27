@@ -779,14 +779,15 @@ impl Publication {
     pub async fn list_published_by_cid(
         db: &scylladb::ScyllaDB,
         cid: xid::Id,
+        from_status: i8,
     ) -> anyhow::Result<Vec<Publication>> {
         let fields = Self::select_fields(vec!["status".to_string()], true)?;
         let query_size = 1000i32;
 
         let query = format!(
-            "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM publication WHERE cid=? AND status>=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(","));
-        let params = (cid.to_cql(), 2i8, query_size);
+        let params = (cid.to_cql(), from_status, query_size);
         let rows = db.execute_iter(query, params).await?;
 
         let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
@@ -1422,17 +1423,23 @@ mod tests {
                 .await
                 .unwrap();
 
-        let res = Publication::list_published_by_cid(db, cid).await.unwrap();
+        let res = Publication::list_published_by_cid(db, cid, 2i8)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 1);
 
         doc2.update_status(db, 1i8, doc2.updated_at).await.unwrap();
         doc2.update_status(db, 2i8, doc2.updated_at).await.unwrap();
-        let res = Publication::list_published_by_cid(db, cid).await.unwrap();
+        let res = Publication::list_published_by_cid(db, cid, 2i8)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
 
         doc3.update_status(db, 1i8, doc3.updated_at).await.unwrap();
         doc3.update_status(db, 2i8, doc3.updated_at).await.unwrap();
-        let res = Publication::list_published_by_cid(db, cid).await.unwrap();
+        let res = Publication::list_published_by_cid(db, cid, 2i8)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 3);
     }
 }
