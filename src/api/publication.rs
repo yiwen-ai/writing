@@ -378,7 +378,7 @@ pub async fn get_publish_list(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let docs = db::Publication::list_published_by_cid(&app.scylla, cid, status).await?;
+    let docs = db::Publication::list_published_by_cid(&app.scylla, gid, cid, status).await?;
 
     ctx.set("total_size", docs.len().into()).await;
     Ok(to.with(SuccessResponse::new(

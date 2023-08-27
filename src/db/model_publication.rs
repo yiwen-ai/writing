@@ -778,6 +778,7 @@ impl Publication {
 
     pub async fn list_published_by_cid(
         db: &scylladb::ScyllaDB,
+        gid: xid::Id,
         cid: xid::Id,
         from_status: i8,
     ) -> anyhow::Result<Vec<Publication>> {
@@ -797,7 +798,9 @@ impl Publication {
             cols.fill(row, &fields)?;
             doc.fill(&cols);
             doc._fields = fields.clone();
-            docs.push(doc);
+            if doc.status == 2 || doc.gid == gid {
+                docs.push(doc);
+            }
         }
         // TODO: filter by version
         docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
@@ -1423,21 +1426,22 @@ mod tests {
                 .await
                 .unwrap();
 
-        let res = Publication::list_published_by_cid(db, cid, 2i8)
+        let gid2 = xid::new();
+        let res = Publication::list_published_by_cid(db, gid2, cid, 2i8)
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
 
         doc2.update_status(db, 1i8, doc2.updated_at).await.unwrap();
         doc2.update_status(db, 2i8, doc2.updated_at).await.unwrap();
-        let res = Publication::list_published_by_cid(db, cid, 2i8)
+        let res = Publication::list_published_by_cid(db, gid2, cid, 2i8)
             .await
             .unwrap();
         assert_eq!(res.len(), 2);
 
         doc3.update_status(db, 1i8, doc3.updated_at).await.unwrap();
         doc3.update_status(db, 2i8, doc3.updated_at).await.unwrap();
-        let res = Publication::list_published_by_cid(db, cid, 2i8)
+        let res = Publication::list_published_by_cid(db, gid2, cid, 2i8)
             .await
             .unwrap();
         assert_eq!(res.len(), 3);
