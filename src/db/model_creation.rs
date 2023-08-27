@@ -9,7 +9,7 @@ use scylla_orm_macros::CqlOrm;
 use crate::db::{
     meili,
     scylladb::{self, extract_applied},
-    Content,
+    Content, MAX_ID,
 };
 
 #[derive(Debug, Default, Clone, CqlOrm)]
@@ -613,33 +613,27 @@ impl Creation {
     ) -> anyhow::Result<Vec<Creation>> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let rows = if let Some(id) = page_token {
-            if status.is_none() {
-                let query = format!(
+        let token = match page_token {
+            Some(id) => id,
+            None => MAX_ID,
+        };
+
+        let rows = if status.is_none() {
+            let query = format!(
                 "SELECT {} FROM creation WHERE gid=? AND id<? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","));
-                let params = (gid.to_cql(), id.to_cql(), page_size as i32);
-                db.execute_iter(query, params).await?
-            } else {
-                let query = format!(
-                    "SELECT {} FROM creation WHERE gid=? AND id<? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","));
-                let params = (gid.to_cql(), id.to_cql(), status.unwrap(), page_size as i32);
-                db.execute_iter(query, params).await?
-            }
-        } else if status.is_none() {
-            let query = format!(
-                "SELECT {} FROM creation WHERE gid=? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            );
-            let params = (gid.to_cql(), page_size as i32);
-            db.execute_iter(query, params).await? // TODO: execute_iter or execute_paged?
+            let params = (gid.to_cql(), token.to_cql(), page_size as i32);
+            db.execute_iter(query, params).await?
         } else {
             let query = format!(
-                "SELECT {} FROM creation WHERE gid=? AND status=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
+                    "SELECT {} FROM creation WHERE gid=? AND status=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    fields.clone().join(","));
+            let params = (
+                gid.to_cql(),
+                status.unwrap(),
+                token.to_cql(),
+                page_size as i32,
             );
-            let params = (gid.to_cql(), status.unwrap(), page_size as i32);
             db.execute_iter(query, params).await?
         };
 

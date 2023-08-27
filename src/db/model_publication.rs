@@ -635,7 +635,6 @@ impl Publication {
         language: Option<Language>,
     ) -> anyhow::Result<Vec<Publication>> {
         let fields = Self::select_fields(select_fields, true)?;
-        let mut page_token = page_token;
         let mut res: Vec<Publication> = Vec::with_capacity(page_size as usize);
         let query_size: i32 = match page_size {
             v if v <= 10 => 20,
@@ -663,21 +662,6 @@ impl Publication {
                 db.execute_iter(query, params).await?
             };
 
-            // } else if status.is_none() {
-            //     let query = format!(
-            //         "SELECT {} FROM publication WHERE gid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-            //         fields.clone().join(","));
-
-            //     let params = (gid.to_cql(), query_size);
-            //     db.execute_iter(query, params).await?
-            // } else {
-            //     let query = format!(
-            //     "SELECT {} FROM publication WHERE gid=? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-            //     fields.clone().join(","));
-            //     let params = (gid.to_cql(), status.unwrap(), query_size);
-            //     db.execute_iter(query, params).await?
-            // };
-
             if rows.is_empty() {
                 break 'label;
             }
@@ -694,17 +678,13 @@ impl Publication {
                     let prev = res.last_mut().unwrap();
                     if prev.cid != doc.cid {
                         res.push(doc);
-                    } else if prev.status == 2 {
-                        if prev.language != doc.language {
-                            match language {
-                                // prefer language match
-                                Some(lang) if lang == doc.language => *prev = doc,
-                                // or original language
-                                None if doc.language == doc.from_language => *prev = doc,
-                                _ => {} // ignore
-                            }
-                        } else if prev.version < doc.version {
-                            *prev = doc; // new version replace old version
+                    } else if prev.status == 2 && prev.language != doc.language {
+                        match language {
+                            // prefer language match
+                            Some(lang) if lang == doc.language => *prev = doc,
+                            // or original language
+                            None if doc.language == doc.from_language => *prev = doc,
+                            _ => {} // ignore
                         }
                     }
                 }
@@ -724,11 +704,13 @@ impl Publication {
         gids: Vec<xid::Id>,
         select_fields: Vec<String>,
         page_token: Option<xid::Id>,
+        language: Option<Language>,
     ) -> anyhow::Result<(Vec<Publication>, xid::Id)> {
         let fields = Self::select_fields(select_fields, true)?;
 
         let secs: u32 = 3600 * 48;
         let query_size: i32 = match gids.len() {
+            v if v <= 5 => 5,
             v if v <= 20 => 4,
             v if v <= 50 => 3,
             v if v <= 100 => 2,
@@ -755,67 +737,43 @@ impl Publication {
 
         for gid in gids {
             let query = format!(
-                    "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+                    "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? BYPASS CACHE USING TIMEOUT 3s",
                     fields.clone().join(","));
-            let params = (
-                gid.to_cql(),
-                2i8,
-                start_id.to_cql(),
-                end_id.to_cql(),
-                query_size,
-            );
+            let params = (gid.to_cql(), 2i8, start_id.to_cql(), end_id.to_cql());
             let rows = db.execute_iter(query, params).await?;
+            let mut local_size = 0i32;
             for row in rows {
                 let mut doc = Publication::default();
                 let mut cols = ColumnsMap::with_capacity(fields.len());
                 cols.fill(row, &fields)?;
                 doc.fill(&cols);
                 doc._fields = fields.clone();
-                res.push(doc);
+                if res.is_empty() {
+                    res.push(doc);
+                    local_size += 1;
+                } else {
+                    let prev = res.last_mut().unwrap();
+                    if prev.cid != doc.cid {
+                        res.push(doc);
+                        local_size += 1;
+                    } else if prev.language != doc.language {
+                        match language {
+                            // prefer language match
+                            Some(lang) if lang == doc.language => *prev = doc,
+                            // or original language
+                            None if doc.language == doc.from_language => *prev = doc,
+                            _ => {} // ignore
+                        }
+                    }
+                }
+
+                if local_size >= query_size {
+                    break;
+                }
             }
         }
 
-        res.sort_by(|a, b| b.updated_at.partial_cmp(&a.updated_at).unwrap());
         Ok((res, start_id))
-    }
-
-    pub async fn list_by_gid_cid(
-        db: &scylladb::ScyllaDB,
-        gid: xid::Id,
-        cid: xid::Id,
-        select_fields: Vec<String>,
-        status: Option<i8>,
-    ) -> anyhow::Result<Vec<Publication>> {
-        let fields = Self::select_fields(select_fields, true)?;
-        let query_size = 1000i32;
-
-        let rows = if status.is_none() {
-            let query = format!(
-                "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 GROUP BY cid LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            );
-            let params = (gid.to_cql(), cid.to_cql(), query_size);
-            db.execute_iter(query, params).await?
-        } else {
-            let query = format!(
-                "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? GROUP BY cid LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            );
-            let params = (gid.to_cql(), cid.to_cql(), status.unwrap(), query_size);
-            db.execute_iter(query, params).await?
-        };
-
-        let mut res: Vec<Publication> = Vec::with_capacity(rows.len());
-        for row in rows {
-            let mut doc = Publication::default();
-            let mut cols = ColumnsMap::with_capacity(fields.len());
-            cols.fill(row, &fields)?;
-            doc.fill(&cols);
-            doc._fields = fields.clone();
-            res.push(doc);
-        }
-
-        Ok(res)
     }
 
     pub async fn list_published_by_cid(
@@ -841,7 +799,7 @@ impl Publication {
             docs.push(doc);
         }
         // TODO: filter by version
-        // docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
         Ok(docs)
     }
 

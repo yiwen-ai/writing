@@ -5,7 +5,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use crate::db::{scylladb, scylladb::extract_applied};
+use crate::db::{scylladb, scylladb::extract_applied, MAX_ID};
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Collection {
@@ -205,20 +205,17 @@ impl Collection {
     ) -> anyhow::Result<Vec<Collection>> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let rows = if let Some(id) = page_token {
-            let query = format!(
-                "SELECT {} FROM collection WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","));
-            let params = (uid.to_cql(), id.to_cql(), page_size as i32);
-            db.execute_iter(query, params).await?
-        } else {
-            let query = format!(
-                "SELECT {} FROM collection WHERE uid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(",")
-            );
-            let params = (uid.to_cql(), page_size as i32);
-            db.execute_iter(query, params).await?
+        let token = match page_token {
+            Some(id) => id,
+            None => MAX_ID,
         };
+
+        let query = format!(
+            "SELECT {} FROM collection WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (uid.to_cql(), token.to_cql(), page_size as i32);
+        let rows = db.execute_iter(query, params).await?;
 
         let mut res: Vec<Collection> = Vec::with_capacity(rows.len());
         for row in rows {

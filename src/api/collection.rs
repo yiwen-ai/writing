@@ -126,9 +126,9 @@ pub async fn create(
     let mut doc = db::Collection {
         uid: ctx.user,
         id: xid::new(),
-        gid: gid,
-        cid: cid,
-        language: language,
+        gid,
+        cid,
+        language,
         version: input.version,
         title: input.title,
         labels: input.labels.unwrap_or_default(),

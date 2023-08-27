@@ -336,6 +336,7 @@ pub async fn list_by_gids(
         input.gids.into_iter().map(|v| v.unwrap()).collect(),
         fields,
         token_to_xid(&input.page_token),
+        ctx.language,
     )
     .await?;
 
