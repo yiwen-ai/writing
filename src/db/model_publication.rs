@@ -786,6 +786,7 @@ impl Publication {
             vec![
                 "status".to_string(),
                 "updated_at".to_string(),
+                "from_language".to_string(),
                 "title".to_string(),
             ],
             true,
