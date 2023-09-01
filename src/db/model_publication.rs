@@ -782,7 +782,14 @@ impl Publication {
         cid: xid::Id,
         from_status: i8,
     ) -> anyhow::Result<Vec<Publication>> {
-        let fields = Self::select_fields(vec!["status".to_string()], true)?;
+        let fields = Self::select_fields(
+            vec![
+                "status".to_string(),
+                "updated_at".to_string(),
+                "title".to_string(),
+            ],
+            true,
+        )?;
         let query_size = 1000i32;
 
         let query = format!(

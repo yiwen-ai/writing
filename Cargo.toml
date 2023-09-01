@@ -1,6 +1,6 @@
 [package]
 name = "writing"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 rust-version = "1.64"
 description = ""
@@ -13,7 +13,7 @@ repository = "https://github.com/yiwen-ai/writing"
 members = ["crates/*"]
 
 [workspace.dependencies]
-anyhow = "1.0"
+anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.6", features = [
   "headers",
@@ -25,7 +25,7 @@ axum = { version = "0.6", features = [
   "tokio",
   "query",
 ], default-features = true }
-bytes = "1.4"
+bytes = "1"
 base64 = "0.21"
 ciborium = "0.2"
 ciborium-io = "0.2"
@@ -35,13 +35,13 @@ isolang = { git = "https://github.com/yiwen-ai/isolang-rs.git", branch = "master
   "local_names",
   "list_languages",
 ] }
-libflate = "1.4"
+libflate = "1"
 log = "0.4"
 mime = "0.3"
 scylla = "0.9"
-serde = "1.0"
-serde_json = { version = "1.0", features = ["preserve_order"] }
-structured-logger = "1.0"
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+structured-logger = "1"
 tokio = { version = "1", features = [
   "fs",
   "io-util",
@@ -56,7 +56,7 @@ tokio = { version = "1", features = [
   "sync",
   "time",
 ], default-features = true }
-uuid = { version = "1.4", features = ["fast-rng", "v4", "v8"] }
+uuid = { version = "1", features = ["fast-rng", "v4", "v8"] }
 validator = { version = "0.16", features = ["derive"] }
 xid = { git = "https://github.com/yiwen-ai/xid-rs.git", tag = "v1.1.0" }
 zstd = "0.12"
