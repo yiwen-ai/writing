@@ -479,7 +479,7 @@ impl Creation {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec![
+        let valid_fields = [
             "title", "cover", "keywords", "labels", "authors", "summary", "license",
         ];
         let update_fields = cols.keys();

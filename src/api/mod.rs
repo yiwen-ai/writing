@@ -14,7 +14,10 @@ pub mod publication;
 pub mod search;
 
 mod content;
-pub use content::{validate_cbor_content, AttrValue, DocumentNode, PartialNode};
+pub use content::{
+    validate_cbor_content, AttrValue, DocumentNode, PartialNode, MAX_CONTENT_LEN,
+    MAX_CREATION_CONTENT_LEN,
+};
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -54,6 +54,8 @@ pub struct PublicationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<PackObject<Vec<u8>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_length: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
 }
 
@@ -85,7 +87,13 @@ impl PublicationOutput {
                 "keywords" => rt.keywords = Some(val.keywords.to_owned()),
                 "authors" => rt.authors = Some(val.authors.to_owned()),
                 "summary" => rt.summary = Some(val.summary.to_owned()),
-                "content" => rt.content = Some(to.with(val._content.to_owned())),
+                "content" => {
+                    rt.content_length = Some(val._length);
+                    if !val._content.is_empty() {
+                        rt.content_length = Some(val._content.len() as i32);
+                        rt.content = Some(to.with(val._content.to_owned()));
+                    }
+                }
                 "license" => rt.license = Some(val.license.to_owned()),
                 _ => {}
             }

@@ -36,6 +36,7 @@ pub struct Publication {
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
     pub _rating: i8,          // 内容安全分级
+    pub _length: i32,         // 内容字节长度
     pub _content: Vec<u8>,
 }
 
@@ -181,7 +182,17 @@ impl Publication {
         db: &scylladb::ScyllaDB,
         select_fields: Vec<String>,
     ) -> anyhow::Result<()> {
-        let fields = Self::select_fields(select_fields, false)?;
+        let get_length = select_fields
+            .iter()
+            .position(|v| v == &"content_length".to_string());
+        let fields = if let Some(i) = get_length {
+            let mut select_fields = select_fields;
+            select_fields[i] = "content".to_string();
+            Self::select_fields(select_fields, false)?
+        } else {
+            Self::select_fields(select_fields, false)?
+        };
+
         self._fields = fields.clone();
 
         let query = format!(
@@ -202,8 +213,14 @@ impl Publication {
 
         if self._fields.contains(&"content".to_string()) {
             let mut doc = Content::with_pk(self.content);
-            doc.get_one(db, vec!["content".to_string()]).await?;
-            self._content = doc.content;
+            if get_length.is_some() {
+                doc.get_one(db, vec!["length".to_string()]).await?;
+                self._length = doc.length;
+            } else {
+                doc.get_one(db, vec!["content".to_string()]).await?;
+                self._length = doc.length;
+                self._content = doc.content;
+            }
         }
 
         Ok(())
@@ -363,7 +380,7 @@ impl Publication {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec!["model", "title", "cover", "keywords", "summary"];
+        let valid_fields = ["model", "title", "cover", "keywords", "summary"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
@@ -1187,6 +1204,7 @@ mod tests {
             let mut backup = Publication::with_pk(gid, cid, language, version);
             backup.get_one(db, vec![]).await.unwrap();
             backup.updated_at = 0;
+            backup._length = 0;
             backup._content = vec![];
 
             let mut deleted = Publication::with_pk(gid, cid, language, version);

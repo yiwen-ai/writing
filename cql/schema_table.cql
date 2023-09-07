@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS content (
     version    SMALLINT, -- creation version
     language   TEXT,     -- creation's language, ISO 639-3
     updated_at BIGINT,   -- update at
+    length     INT,      -- content size in bytes
     hash       BLOB,     -- SHA3 256
     content    BLOB,     -- content in CBOR format
     PRIMARY KEY (id)

@@ -131,7 +131,7 @@ impl Collection {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = vec!["version", "title", "gid", "language", "labels"];
+        let valid_fields = ["version", "title", "gid", "language", "labels"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {

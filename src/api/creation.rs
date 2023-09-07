@@ -16,7 +16,7 @@ use scylla_orm::ColumnsMap;
 
 use super::{
     get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
-    QueryGidId, UpdateStatusInput,
+    QueryGidId, UpdateStatusInput, MAX_CREATION_CONTENT_LEN,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -126,6 +126,17 @@ pub async fn create(
 ) -> Result<PackObject<SuccessResponse<CreationOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
+    if input.content.len() > MAX_CREATION_CONTENT_LEN {
+        return Err(HTTPError::new(
+            400,
+            format!(
+                "content length is too long, expected <= {}, got {}",
+                MAX_CREATION_CONTENT_LEN,
+                input.content.len()
+            ),
+        ));
+    }
+
     valid_user(ctx.user)?;
 
     let mut doc = db::Creation {

@@ -17,6 +17,7 @@ pub struct Content {
     pub version: i16,
     pub language: Language,
     pub updated_at: i64,
+    pub length: i32,
     pub hash: Vec<u8>,
     pub content: Vec<u8>,
 
@@ -100,6 +101,10 @@ impl Content {
         cols.fill(res, &fields)?;
         self.fill(&cols);
 
+        if self.length == 0 {
+            self.length = self.content.len() as i32;
+        }
+
         Ok(())
     }
 
@@ -107,6 +112,7 @@ impl Content {
         let fields = Self::fields();
         self._fields = fields.clone();
 
+        self.length = self.content.len() as i32;
         let mut hasher = Sha3_256::new();
         hasher.update(&self.content);
         self.hash = hasher.finalize().to_vec();
@@ -146,12 +152,19 @@ impl Content {
         content: Vec<u8>,
     ) -> anyhow::Result<bool> {
         let new_updated_at = unix_ms() as i64;
+        let length = content.len() as i32;
+        let mut hasher = Sha3_256::new();
+        hasher.update(&content);
+        let hash: Vec<u8> = hasher.finalize().to_vec();
+
         let query =
-            "UPDATE content SET updated_at=?,version=?,language=?,content=? WHERE id=? IF EXISTS";
+            "UPDATE content SET updated_at=?,version=?,language=?,length=?,hash=?,content=? WHERE id=? IF EXISTS";
         let params = (
             new_updated_at,
             version,
             language.to_cql(),
+            length,
+            hash.to_cql(),
             content.to_cql(),
             self.id.to_cql(),
         );
@@ -168,6 +181,8 @@ impl Content {
         self.updated_at = new_updated_at;
         self.version = version;
         self.language = language;
+        self.length = length;
+        self.hash = hash;
         self.content = content;
         Ok(true)
     }

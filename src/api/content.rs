@@ -4,7 +4,8 @@ use validator::ValidationError;
 
 use axum_web::object::{cbor_from_slice, PackObject};
 
-pub const MAX_CONTENT_LEN: usize = 1024 * 1024;
+pub const MAX_CONTENT_LEN: usize = 768 * 1024;
+pub const MAX_CREATION_CONTENT_LEN: usize = 512 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct DocumentNode {
