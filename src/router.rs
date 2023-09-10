@@ -111,17 +111,17 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 ), // patch content
         )
         .nest(
-            "/v1/collection",
+            "/v1/bookmark",
             Router::new()
                 .route(
                     "/",
-                    routing::post(api::collection::create)
-                        .get(api::collection::get)
-                        .patch(api::collection::update)
-                        .delete(api::collection::delete),
+                    routing::post(api::bookmark::create)
+                        .get(api::bookmark::get)
+                        .patch(api::bookmark::update)
+                        .delete(api::bookmark::delete),
                 )
-                .route("/by_cid", routing::get(api::collection::get_by_cid))
-                .route("/list", routing::post(api::collection::list)),
+                .route("/by_cid", routing::get(api::bookmark::get_by_cid))
+                .route("/list", routing::post(api::bookmark::list)),
         )
         .nest(
             "/v1/sys",
@@ -129,7 +129,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/creation", routing::patch(todo).delete(todo))
                 .route("/publication", routing::patch(todo).delete(todo))
                 .route("/publication/comment", routing::patch(todo).delete(todo))
-                .route("/collection", routing::patch(todo).delete(todo)),
+                .route("/bookmark", routing::patch(todo).delete(todo)),
         )
         .route_layer(mds)
         .with_state(app_state.clone());

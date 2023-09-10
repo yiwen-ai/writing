@@ -8,7 +8,7 @@ use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 
 use crate::db;
 
-pub mod collection;
+pub mod bookmark;
 pub mod creation;
 pub mod publication;
 pub mod search;

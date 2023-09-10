@@ -91,25 +91,25 @@ CREATE INDEX publication_cid ON publication (cid);
 CREATE INDEX publication_url ON publication (original_url);
 CREATE INDEX publication_gid_status ON publication ((gid), status);
 
-CREATE TABLE IF NOT EXISTS collection (
-    uid         BLOB,        -- user id who create the collection, 12 bytes XID
-    id          BLOB,        -- collection id, 12 bytes XID
+CREATE TABLE IF NOT EXISTS bookmark (
+    uid         BLOB,        -- user id who create the bookmark, 12 bytes XID
+    id          BLOB,        -- bookmark id, 12 bytes XID
     cid         BLOB,        -- publication id, 12 bytes XID
     gid         BLOB,        -- group id, publication belong to
     language    TEXT,        -- publication language
     version     SMALLINT,    -- publication version
     updated_at  BIGINT,      -- update at, unix time with second precision.
     title       TEXT,        -- publication title
-    labels      LIST<TEXT>,  -- labels for collections management
+    labels      LIST<TEXT>,  -- labels for bookmarks management
     PRIMARY KEY (uid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND  caching = {'enabled': 'false'}
-    AND comment = 'user''s collections'
+    AND comment = 'user''s bookmarks'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX collection_uid_cid ON collection ((uid), cid);
+CREATE INDEX bookmark_uid_cid ON bookmark ((uid), cid);
 
 CREATE TABLE IF NOT EXISTS deleted_creation (
     gid              BLOB,        -- group id, creation belong to

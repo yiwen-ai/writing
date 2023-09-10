@@ -8,7 +8,7 @@ use scylla_orm_macros::CqlOrm;
 use crate::db::{scylladb, scylladb::extract_applied, MAX_ID};
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
-pub struct Collection {
+pub struct Bookmark {
     pub uid: xid::Id,
     pub id: xid::Id,
     pub cid: xid::Id,
@@ -22,7 +22,7 @@ pub struct Collection {
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
 
-impl Collection {
+impl Bookmark {
     pub fn with_pk(uid: xid::Id, id: xid::Id) -> Self {
         Self {
             uid,
@@ -77,7 +77,7 @@ impl Collection {
         self._fields = fields.clone();
 
         let query = format!(
-            "SELECT {} FROM collection WHERE uid=? AND id=? LIMIT 1",
+            "SELECT {} FROM bookmark WHERE uid=? AND id=? LIMIT 1",
             fields.join(",")
         );
         let params = (self.uid.to_cql(), self.id.to_cql());
@@ -108,18 +108,16 @@ impl Collection {
         }
 
         let query = format!(
-            "INSERT INTO collection ({}) VALUES ({}) IF NOT EXISTS",
+            "INSERT INTO bookmark ({}) VALUES ({}) IF NOT EXISTS",
             cols_name.join(","),
             vals_name.join(",")
         );
 
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
-            return Err(HTTPError::new(
-                409,
-                "Collection save failed, please try again".to_string(),
-            )
-            .into());
+            return Err(
+                HTTPError::new(409, "Bookmark save failed, please try again".to_string()).into(),
+            );
         }
 
         Ok(true)
@@ -144,7 +142,7 @@ impl Collection {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Collection updated_at conflict, expected updated_at {}, got {}",
+                    "Bookmark updated_at conflict, expected updated_at {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -163,7 +161,7 @@ impl Collection {
         }
 
         let query = format!(
-            "UPDATE collection SET {} WHERE uid=? AND id=? IF updated_at=?",
+            "UPDATE bookmark SET {} WHERE uid=? AND id=? IF updated_at=?",
             set_fields.join(",")
         );
         params.push(self.uid.to_cql());
@@ -174,7 +172,7 @@ impl Collection {
         if !extract_applied(res) {
             return Err(HTTPError::new(
                 409,
-                "Collection update failed, please try again".to_string(),
+                "Bookmark update failed, please try again".to_string(),
             )
             .into());
         }
@@ -189,7 +187,7 @@ impl Collection {
             return Ok(false); // already deleted
         }
 
-        let query = "DELETE FROM collection WHERE uid=? AND id=?";
+        let query = "DELETE FROM bookmark WHERE uid=? AND id=?";
         let params = (self.uid.to_cql(), self.id.to_cql());
         let _ = db.execute(query, params).await?;
 
@@ -202,7 +200,7 @@ impl Collection {
         select_fields: Vec<String>,
         page_size: u16,
         page_token: Option<xid::Id>,
-    ) -> anyhow::Result<Vec<Collection>> {
+    ) -> anyhow::Result<Vec<Self>> {
         let fields = Self::select_fields(select_fields, true)?;
 
         let token = match page_token {
@@ -211,15 +209,15 @@ impl Collection {
         };
 
         let query = format!(
-            "SELECT {} FROM collection WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM bookmark WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(",")
         );
         let params = (uid.to_cql(), token.to_cql(), page_size as i32);
         let rows = db.execute_iter(query, params).await?;
 
-        let mut res: Vec<Collection> = Vec::with_capacity(rows.len());
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
         for row in rows {
-            let mut doc = Collection::default();
+            let mut doc = Self::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, &fields)?;
             doc.fill(&cols);
@@ -235,19 +233,19 @@ impl Collection {
         uid: xid::Id,
         cid: xid::Id,
         select_fields: Vec<String>,
-    ) -> anyhow::Result<Vec<Collection>> {
+    ) -> anyhow::Result<Vec<Self>> {
         let fields = Self::select_fields(select_fields, true)?;
 
         let query = format!(
-            "SELECT {} FROM collection WHERE uid=? AND cid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM bookmark WHERE uid=? AND cid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(",")
         );
         let params = (uid.to_cql(), cid.to_cql(), 1000i32);
         let rows = db.execute_iter(query, params).await?;
 
-        let mut res: Vec<Collection> = Vec::with_capacity(rows.len());
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
         for row in rows {
-            let mut doc = Collection::default();
+            let mut doc = Self::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, &fields)?;
             doc.fill(&cols);
@@ -266,18 +264,18 @@ impl Collection {
         gid: xid::Id,
         language: Language,
         select_fields: Vec<String>,
-    ) -> anyhow::Result<Collection> {
+    ) -> anyhow::Result<Self> {
         let fields = Self::select_fields(select_fields, false)?;
         let query = format!(
-            "SELECT {} FROM collection WHERE uid=? AND cid=? AND gid=? AND language=? LIMIT 1 ALLOW FILTERING BYPASS CACHE",
+            "SELECT {} FROM bookmark WHERE uid=? AND cid=? AND gid=? AND language=? LIMIT 1 ALLOW FILTERING BYPASS CACHE",
             fields.join(",")
         );
         let params = (uid.to_cql(), cid.to_cql(), gid.to_cql(), language.to_cql());
         let rows = db.execute_iter(query, params).await?;
 
-        let mut res: Vec<Collection> = Vec::with_capacity(rows.len());
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
         for row in rows {
-            let mut doc = Collection::default();
+            let mut doc = Self::default();
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, &fields)?;
             doc.fill(&cols);
@@ -291,7 +289,7 @@ impl Collection {
         Err(HTTPError::new(
             404,
             format!(
-                "Collection not found, uid: {}, cid: {}, gid: {}, language: {}",
+                "Bookmark not found, uid: {}, cid: {}, gid: {}, language: {}",
                 uid, cid, gid, language
             ),
         )
@@ -325,11 +323,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn test_all() {
-        collection_model_works().await;
+        bookmark_model_works().await;
     }
 
     // #[tokio::test(flavor = "current_thread")]
-    async fn collection_model_works() {
+    async fn bookmark_model_works() {
         let db = get_db().await;
         let uid = xid::Id::from_str(db::USER_JARVIS).unwrap();
         let id = xid::new();
@@ -337,7 +335,7 @@ mod tests {
 
         // create
         {
-            let mut doc = Collection::with_pk(uid, id);
+            let mut doc = Bookmark::with_pk(uid, id);
             doc.cid = cid;
             doc.language = Language::Eng;
             doc.version = 1;
@@ -354,7 +352,7 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
             assert_eq!(err.code, 409);
 
-            let mut doc2 = Collection::with_pk(uid, id);
+            let mut doc2 = Bookmark::with_pk(uid, id);
             doc2.get_one(db, vec![]).await.unwrap();
 
             assert_eq!(doc2.cid, cid);
@@ -362,7 +360,7 @@ mod tests {
             assert_eq!(doc2.version, 1);
             assert_eq!(doc2.language, Language::Eng);
 
-            let mut doc3 = Collection::with_pk(uid, id);
+            let mut doc3 = Bookmark::with_pk(uid, id);
             doc3.get_one(db, vec!["cid".to_string(), "version".to_string()])
                 .await
                 .unwrap();
@@ -374,7 +372,7 @@ mod tests {
 
         // update
         {
-            let mut doc = Collection::with_pk(uid, id);
+            let mut doc = Bookmark::with_pk(uid, id);
             let mut cols = ColumnsMap::new();
             cols.set_as("status", &2i8);
             let res = doc.update(db, cols, 0).await;
@@ -405,7 +403,7 @@ mod tests {
 
         // delete
         {
-            let mut doc = Collection::with_pk(uid, id);
+            let mut doc = Bookmark::with_pk(uid, id);
             let res = doc.delete(db).await.unwrap();
             assert!(res);
 

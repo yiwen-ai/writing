@@ -17,7 +17,7 @@ use scylla_orm::ColumnsMap;
 use super::{get_fields, token_from_xid, token_to_xid, AppState, Pagination, QueryCid, QueryId};
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
-pub struct CreateCollectionInput {
+pub struct CreateBookmarkInput {
     pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
@@ -30,7 +30,7 @@ pub struct CreateCollectionInput {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct CollectionOutput {
+pub struct BookmarkOutput {
     pub uid: PackObject<xid::Id>,
     pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
@@ -47,8 +47,8 @@ pub struct CollectionOutput {
     pub labels: Option<Vec<String>>,
 }
 
-impl CollectionOutput {
-    fn from<T>(val: db::Collection, to: &PackObject<T>) -> Self {
+impl BookmarkOutput {
+    fn from<T>(val: db::Bookmark, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             uid: to.with(val.uid),
             id: to.with(val.id),
@@ -75,8 +75,8 @@ impl CollectionOutput {
 pub async fn create(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<CreateCollectionInput>,
-) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
+    to: PackObject<CreateBookmarkInput>,
+) -> Result<PackObject<SuccessResponse<BookmarkOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
     valid_user(ctx.user)?;
@@ -84,12 +84,11 @@ pub async fn create(
     let cid = input.cid.unwrap();
     let gid = input.gid.unwrap();
     let language = input.language.unwrap();
-    let res =
-        db::Collection::get_one_by_cid(&app.scylla, ctx.user, cid, gid, language, vec![]).await;
+    let res = db::Bookmark::get_one_by_cid(&app.scylla, ctx.user, cid, gid, language, vec![]).await;
 
     if let Ok(mut doc) = res {
         ctx.set_kvs(vec![
-            ("action", "create_collection".into()),
+            ("action", "create_bookmark".into()),
             ("id", doc.id.to_string().into()),
             ("gid", doc.gid.to_string().into()),
             ("cid", doc.cid.to_string().into()),
@@ -100,11 +99,11 @@ pub async fn create(
         .await;
 
         if doc.version >= input.version {
-            return Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))));
+            return Ok(to.with(SuccessResponse::new(BookmarkOutput::from(doc, &to))));
         }
 
         let updated_at = doc.updated_at;
-        let cols = UpdateCollectionInput {
+        let cols = UpdateBookmarkInput {
             id: to.with(doc.id),
             updated_at,
             version: Some(input.version),
@@ -113,17 +112,17 @@ pub async fn create(
         }
         .into()?;
         ctx.set_kvs(vec![
-            ("action", "update_collection".into()),
+            ("action", "update_bookmark".into()),
             ("id", doc.id.to_string().into()),
         ])
         .await;
 
         let ok = doc.update(&app.scylla, cols, updated_at).await?;
         ctx.set("updated", ok.into()).await;
-        return Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))));
+        return Ok(to.with(SuccessResponse::new(BookmarkOutput::from(doc, &to))));
     }
 
-    let mut doc = db::Collection {
+    let mut doc = db::Bookmark {
         uid: ctx.user,
         id: xid::new(),
         gid,
@@ -136,7 +135,7 @@ pub async fn create(
     };
 
     ctx.set_kvs(vec![
-        ("action", "create_collection".into()),
+        ("action", "create_bookmark".into()),
         ("id", doc.id.to_string().into()),
         ("gid", doc.gid.to_string().into()),
         ("cid", doc.cid.to_string().into()),
@@ -147,7 +146,7 @@ pub async fn create(
 
     let ok = doc.save(&app.scylla).await?;
     ctx.set("created", ok.into()).await;
-    Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
+    Ok(to.with(SuccessResponse::new(BookmarkOutput::from(doc, &to))))
 }
 
 pub async fn get(
@@ -155,42 +154,42 @@ pub async fn get(
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
     input: Query<QueryId>,
-) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<BookmarkOutput>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "get_collection".into()),
+        ("action", "get_bookmark".into()),
         ("id", id.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::Collection::with_pk(ctx.user, id);
+    let mut doc = db::Bookmark::with_pk(ctx.user, id);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
-    Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
+    Ok(to.with(SuccessResponse::new(BookmarkOutput::from(doc, &to))))
 }
 
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<Pagination>,
-) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<Vec<BookmarkOutput>>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
     valid_user(ctx.user)?;
 
     let page_size = input.page_size.unwrap_or(10);
     ctx.set_kvs(vec![
-        ("action", "list_collection".into()),
+        ("action", "list_bookmark".into()),
         ("page_size", page_size.into()),
     ])
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let res = db::Collection::list(
+    let res = db::Bookmark::list(
         &app.scylla,
         ctx.user,
         fields,
@@ -209,7 +208,7 @@ pub async fn list(
         next_page_token,
         result: res
             .iter()
-            .map(|r| CollectionOutput::from(r.to_owned(), &to))
+            .map(|r| BookmarkOutput::from(r.to_owned(), &to))
             .collect(),
     }))
 }
@@ -219,20 +218,20 @@ pub async fn get_by_cid(
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
     input: Query<QueryCid>,
-) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
+) -> Result<PackObject<SuccessResponse<Vec<BookmarkOutput>>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let cid = *input.cid.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "get_collection_by_cid".into()),
+        ("action", "get_bookmark_by_cid".into()),
         ("cid", cid.to_string().into()),
     ])
     .await;
 
     let res =
-        db::Collection::list_by_cid(&app.scylla, ctx.user, cid, get_fields(input.fields.clone()))
+        db::Bookmark::list_by_cid(&app.scylla, ctx.user, cid, get_fields(input.fields.clone()))
             .await?;
 
     Ok(to.with(SuccessResponse {
@@ -240,13 +239,13 @@ pub async fn get_by_cid(
         next_page_token: None,
         result: res
             .iter()
-            .map(|r| CollectionOutput::from(r.to_owned(), &to))
+            .map(|r| BookmarkOutput::from(r.to_owned(), &to))
             .collect(),
     }))
 }
 
 #[derive(Debug, Deserialize, Validate)]
-pub struct UpdateCollectionInput {
+pub struct UpdateBookmarkInput {
     pub id: PackObject<xid::Id>,
     pub updated_at: i64,
     #[validate(range(min = 1, max = 10000))]
@@ -257,7 +256,7 @@ pub struct UpdateCollectionInput {
     pub labels: Option<Vec<String>>,
 }
 
-impl UpdateCollectionInput {
+impl UpdateBookmarkInput {
     fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
         if let Some(version) = self.version {
@@ -281,18 +280,18 @@ impl UpdateCollectionInput {
 pub async fn update(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<UpdateCollectionInput>,
-) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
+    to: PackObject<UpdateBookmarkInput>,
+) -> Result<PackObject<SuccessResponse<BookmarkOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
-    let mut doc = db::Collection::with_pk(ctx.user, id);
+    let mut doc = db::Bookmark::with_pk(ctx.user, id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
     ctx.set_kvs(vec![
-        ("action", "update_collection".into()),
+        ("action", "update_bookmark".into()),
         ("id", doc.id.to_string().into()),
     ])
     .await;
@@ -300,7 +299,7 @@ pub async fn update(
     let ok = doc.update(&app.scylla, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
-    Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
+    Ok(to.with(SuccessResponse::new(BookmarkOutput::from(doc, &to))))
 }
 
 pub async fn delete(
@@ -315,12 +314,12 @@ pub async fn delete(
     let id = *input.id.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "delete_collection".into()),
+        ("action", "delete_bookmark".into()),
         ("id", id.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::Collection::with_pk(ctx.user, id);
+    let mut doc = db::Bookmark::with_pk(ctx.user, id);
     let res = doc.delete(&app.scylla).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
