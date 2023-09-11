@@ -11,6 +11,7 @@ use crate::db::{scylladb, scylladb::extract_applied, MAX_ID};
 pub struct Bookmark {
     pub uid: xid::Id,
     pub id: xid::Id,
+    pub kind: i8,
     pub cid: xid::Id,
     pub gid: xid::Id,
     pub language: Language,
@@ -44,13 +45,17 @@ impl Bookmark {
         }
 
         let mut select_fields = select_fields;
-        let cid = "cid".to_string();
-        if !select_fields.contains(&cid) {
-            select_fields.push(cid);
+        let field = "kind".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
         }
-        let gid = "gid".to_string();
-        if !select_fields.contains(&gid) {
-            select_fields.push(gid);
+        let field = "cid".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
+        let field = "gid".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
         }
 
         if with_pk {

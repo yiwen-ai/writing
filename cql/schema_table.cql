@@ -94,12 +94,13 @@ CREATE INDEX publication_gid_status ON publication ((gid), status);
 CREATE TABLE IF NOT EXISTS bookmark (
     uid         BLOB,        -- user id who create the bookmark, 12 bytes XID
     id          BLOB,        -- bookmark id, 12 bytes XID
-    cid         BLOB,        -- publication id, 12 bytes XID
+    kind        TINYINT,     -- int8, 0: Publication, 1: Collection
+    cid         BLOB,        -- publication id or collection id, 12 bytes XID
     gid         BLOB,        -- group id, publication belong to
-    language    TEXT,        -- publication language
-    version     SMALLINT,    -- publication version
+    language    TEXT,        -- language
+    version     SMALLINT,    -- version
     updated_at  BIGINT,      -- update at, unix time with second precision.
-    title       TEXT,        -- publication title
+    title       TEXT,        -- title
     labels      LIST<TEXT>,  -- labels for bookmarks management
     PRIMARY KEY (uid, id)
 ) WITH CLUSTERING ORDER BY (id DESC)

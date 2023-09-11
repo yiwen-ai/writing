@@ -33,6 +33,7 @@ pub struct CreateBookmarkInput {
 pub struct BookmarkOutput {
     pub uid: PackObject<xid::Id>,
     pub id: PackObject<xid::Id>,
+    pub kind: i8,
     pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -52,6 +53,7 @@ impl BookmarkOutput {
         let mut rt = Self {
             uid: to.with(val.uid),
             id: to.with(val.id),
+            kind: val.kind,
             gid: to.with(val.gid),
             cid: to.with(val.cid),
             ..Default::default()
