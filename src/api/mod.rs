@@ -128,25 +128,12 @@ pub fn token_to_xid(page_token: &Option<PackObject<Vec<u8>>>) -> Option<xid::Id>
     }
 }
 
-pub fn token_from_xid(id: xid::Id) -> Option<Vec<u8>> {
-    cbor_to_vec(&PackObject::Cbor(id)).ok()
+pub fn token_from_xid(id: Option<xid::Id>) -> Option<Vec<u8>> {
+    match id {
+        Some(id) => cbor_to_vec(&PackObject::Cbor(id)).ok(),
+        _ => None,
+    }
 }
-
-// pub fn token_to_publication(
-//     page_token: &Option<PackObject<Vec<u8>>>,
-// ) -> Option<(xid::Id, Language, i16)> {
-//     match page_token.as_ref().map(|v| v.unwrap_ref()) {
-//         Some(v) => cbor_from_slice::<(PackObject<xid::Id>, PackObject<Language>, i16)>(&v)
-//             .ok()
-//             .map(|v| (v.0.unwrap(), v.1.unwrap(), v.2)),
-//         _ => None,
-//     }
-// }
-
-// pub fn token_from_publication(v: (xid::Id, Language, i16)) -> Option<Vec<u8>> {
-//     let v = (PackObject::Cbor(v.0), PackObject::Cbor(v.1), v.2);
-//     cbor_to_vec(&v).ok()
-// }
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateStatusInput {
@@ -194,7 +181,7 @@ mod tests {
     #[test]
     fn token_to_xid_works() {
         let input = xid::new();
-        let v = token_from_xid(input).unwrap();
+        let v = token_from_xid(Some(input)).unwrap();
         assert_eq!(hex_string(&v).len(), 26);
         let rt = token_to_xid(&Some(PackObject::Cbor(v)));
         assert_eq!(rt, Some(input));

@@ -297,16 +297,14 @@ pub async fn list(
         ctx.language,
     )
     .await?;
-    let next_page_token = if res.len() >= page_size as usize {
-        let v = res.last().unwrap();
-        to.with_option(token_from_xid(v.cid))
-    } else {
-        None
-    };
 
     Ok(to.with(SuccessResponse {
         total_size: None,
-        next_page_token,
+        next_page_token: to.with_option(token_from_xid(if res.len() >= page_size as usize {
+            Some(res.last().unwrap().cid)
+        } else {
+            None
+        })),
         result: res
             .iter()
             .map(|r| PublicationOutput::from(r.to_owned(), &to))

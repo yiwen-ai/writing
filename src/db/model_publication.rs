@@ -756,75 +756,69 @@ impl Publication {
         select_fields: Vec<String>,
         page_token: Option<xid::Id>,
         language: Option<Language>,
-    ) -> anyhow::Result<(Vec<Publication>, xid::Id)> {
+    ) -> anyhow::Result<(Vec<Publication>, Option<xid::Id>)> {
         let fields = Self::select_fields(select_fields, true)?;
 
-        let secs: u32 = 3600 * 48;
-        let query_size: i32 = match gids.len() {
-            v if v <= 5 => 5,
-            v if v <= 20 => 4,
-            v if v <= 50 => 3,
-            v if v <= 100 => 2,
-            _ => 1,
+        let secs: u32 = 3600 * 24;
+        let mut res: Vec<Publication> = Vec::new();
+        let query = format!(
+            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? BYPASS CACHE USING TIMEOUT 3s",
+            fields.clone().join(","));
+
+        let mut end_id = if let Some(cid) = page_token {
+            cid
+        } else {
+            let unix_ts = (unix_ms() / 1000) as u32;
+            let mut end_id = xid::Id::default();
+            end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
+            end_id
         };
 
-        let mut res: Vec<Publication> = Vec::with_capacity(gids.len() * 2);
-
-        let (start_id, end_id) = if let Some(cid) = page_token {
-            let raw = cid.as_bytes();
+        let mut i = 0i8;
+        while i < 7 {
+            let raw = end_id.as_bytes();
             let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
             let mut start_id = xid::Id::default();
             start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
-            (start_id, cid)
-        } else {
-            // from 1 days ago
-            let unix_ts = (unix_ms() / 1000) as u32;
-            let mut start_id = xid::Id::default();
-            let mut end_id = xid::Id::default();
-            start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
-            end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
-            (start_id, end_id)
-        };
 
-        for gid in gids {
-            let query = format!(
-                    "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","));
-            let params = (gid.to_cql(), 2i8, start_id.to_cql(), end_id.to_cql());
-            let rows = db.execute_iter(query, params).await?;
-            let mut local_size = 0i32;
-            for row in rows {
-                let mut doc = Publication::default();
-                let mut cols = ColumnsMap::with_capacity(fields.len());
-                cols.fill(row, &fields)?;
-                doc.fill(&cols);
-                doc._fields = fields.clone();
-                if res.is_empty() {
-                    res.push(doc);
-                    local_size += 1;
-                } else {
-                    let prev = res.last_mut().unwrap();
-                    if prev.cid != doc.cid {
+            for gid in gids.iter() {
+                let params = (gid.to_cql(), 2i8, start_id.to_cql(), end_id.to_cql());
+                let rows = db.execute_iter(query.as_str(), params).await?;
+                for row in rows {
+                    let mut doc = Publication::default();
+                    let mut cols = ColumnsMap::with_capacity(fields.len());
+                    cols.fill(row, &fields)?;
+                    doc.fill(&cols);
+                    doc._fields = fields.clone();
+                    if res.is_empty() {
                         res.push(doc);
-                        local_size += 1;
-                    } else if prev.language != doc.language {
-                        match language {
-                            // prefer language match
-                            Some(lang) if lang == doc.language => *prev = doc,
-                            // or original language
-                            None if doc.language == doc.from_language => *prev = doc,
-                            _ => {} // ignore
+                    } else {
+                        let prev = res.last_mut().unwrap();
+                        if prev.cid != doc.cid {
+                            res.push(doc);
+                        } else if prev.language != doc.language {
+                            match language {
+                                // prefer language match
+                                Some(lang) if lang == doc.language => *prev = doc,
+                                // or original language
+                                None if doc.language == doc.from_language => *prev = doc,
+                                _ => {} // ignore
+                            }
                         }
                     }
                 }
-
-                if local_size >= query_size {
-                    break;
-                }
             }
+
+            if !res.is_empty() {
+                res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+                return Ok((res, Some(start_id)));
+            }
+
+            i += 1;
+            end_id = start_id;
         }
 
-        Ok((res, start_id))
+        Ok((res, None))
     }
 
     pub async fn list_published_by_cid(
