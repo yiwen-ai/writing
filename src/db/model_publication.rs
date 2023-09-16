@@ -1,5 +1,5 @@
 use isolang::Language;
-use std::convert::From;
+use std::{collections::HashSet, convert::From};
 
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
@@ -664,23 +664,51 @@ impl Publication {
             None => MAX_ID,
         };
 
+        let query = if status.is_none() {
+            format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+        } else {
+            format!(
+            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+        };
+
+        let tail_query = if status.is_none() {
+            format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+        } else {
+            format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+        };
+
+        let mut docs_set: HashSet<(xid::Id, Language, i16)> = HashSet::new();
         'label: loop {
-            let rows = if status.is_none() {
-                let query = format!(
-                "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
-                fields.clone().join(","));
+            let mut rows = if status.is_none() {
                 let params = (gid.to_cql(), token.to_cql(), query_size);
-                db.execute_iter(query, params).await?
+                db.execute_iter(query.as_str(), params).await?
             } else {
-                let query = format!(
-                    "SELECT {} FROM publication WHERE gid=? AND status=? AND cid<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
-                    fields.clone().join(","));
                 let params = (gid.to_cql(), status.unwrap(), token.to_cql(), query_size);
-                db.execute_iter(query, params).await?
+                db.execute_iter(query.as_str(), params).await?
             };
 
             if rows.is_empty() {
                 break 'label;
+            }
+
+            // ensure all publications with same cid are fetched
+            {
+                let mut doc = Publication::default();
+                let mut cols = ColumnsMap::with_capacity(fields.len());
+                let row = rows.pop().unwrap();
+                cols.fill(row, &fields)?;
+                doc.fill(&cols);
+                let tail_rows = if status.is_none() {
+                    let params = (gid.to_cql(), doc.cid.to_cql());
+                    db.execute_iter(tail_query.as_str(), params).await?
+                } else {
+                    let params = (gid.to_cql(), status.unwrap(), doc.cid.to_cql());
+                    db.execute_iter(tail_query.as_str(), params).await?
+                };
+                rows.extend(tail_rows);
             }
 
             for row in rows {
@@ -689,6 +717,12 @@ impl Publication {
                 cols.fill(row, &fields)?;
                 doc.fill(&cols);
                 doc._fields = fields.clone();
+
+                let pk = (doc.cid, doc.language, doc.version);
+                if docs_set.contains(&pk) {
+                    continue;
+                }
+                docs_set.insert(pk);
                 if doc.status < 2 || res.is_empty() {
                     res.push(doc);
                 } else {
@@ -705,10 +739,10 @@ impl Publication {
                         }
                     }
                 }
+            }
 
-                if res.len() >= page_size as usize {
-                    break 'label;
-                }
+            if res.len() >= page_size as usize {
+                break 'label;
             }
             token = res.last().unwrap().cid;
         }
@@ -1327,7 +1361,7 @@ mod tests {
         let latest = Publication::list_by_gid(db, gid, Vec::new(), 1, None, None, None)
             .await
             .unwrap();
-        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.len(), 20);
         let mut latest = latest[0].to_owned();
         assert_eq!(latest.gid, docs.last().unwrap().gid);
         assert_eq!(latest.cid, docs.last().unwrap().cid);
