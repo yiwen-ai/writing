@@ -280,7 +280,7 @@ pub async fn list(
     let gid = input.gid.unwrap();
     let page_size = input.page_size.unwrap_or(10);
     ctx.set_kvs(vec![
-        ("action", "list_creation".into()),
+        ("action", "list_publication".into()),
         ("gid", gid.to_string().into()),
         ("page_size", page_size.into()),
     ])

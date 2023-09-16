@@ -653,11 +653,6 @@ impl Publication {
     ) -> anyhow::Result<Vec<Publication>> {
         let fields = Self::select_fields(select_fields, true)?;
         let mut res: Vec<Publication> = Vec::with_capacity(page_size as usize);
-        let query_size: i32 = match page_size {
-            v if v <= 10 => 20,
-            v if v <= 100 => v as i32 * 2,
-            v => v as i32 + 100,
-        };
 
         let mut token = match page_token {
             Some(cid) => cid,
@@ -683,10 +678,15 @@ impl Publication {
         let mut docs_set: HashSet<(xid::Id, Language, i16)> = HashSet::new();
         'label: loop {
             let mut rows = if status.is_none() {
-                let params = (gid.to_cql(), token.to_cql(), query_size);
+                let params = (gid.to_cql(), token.to_cql(), page_size as i32);
                 db.execute_iter(query.as_str(), params).await?
             } else {
-                let params = (gid.to_cql(), status.unwrap(), token.to_cql(), query_size);
+                let params = (
+                    gid.to_cql(),
+                    status.unwrap(),
+                    token.to_cql(),
+                    page_size as i32,
+                );
                 db.execute_iter(query.as_str(), params).await?
             };
 
@@ -705,7 +705,7 @@ impl Publication {
                     let params = (gid.to_cql(), doc.cid.to_cql());
                     db.execute_iter(tail_query.as_str(), params).await?
                 } else {
-                    let params = (gid.to_cql(), status.unwrap(), doc.cid.to_cql());
+                    let params = (gid.to_cql(), doc.cid.to_cql(), status.unwrap());
                     db.execute_iter(tail_query.as_str(), params).await?
                 };
                 rows.extend(tail_rows);
@@ -1361,7 +1361,7 @@ mod tests {
         let latest = Publication::list_by_gid(db, gid, Vec::new(), 1, None, None, None)
             .await
             .unwrap();
-        assert_eq!(latest.len(), 20);
+        assert_eq!(latest.len(), 2);
         let mut latest = latest[0].to_owned();
         assert_eq!(latest.gid, docs.last().unwrap().gid);
         assert_eq!(latest.cid, docs.last().unwrap().cid);
@@ -1380,53 +1380,6 @@ mod tests {
 
         // println!("{:?}", res);
         assert_eq!(res.len(), 20);
-
-        // let res =
-        //     Publication::list_by_gid(db, gid, vec!["title".to_string()], 100, None, Some(1), None)
-        //         .await
-        //         .unwrap();
-        // assert_eq!(res.len(), 1);
-        // assert_eq!(res[0].cid, latest.cid);
-        // assert_eq!(res[0].version, 2i16);
-
-        // let res = Publication::list_by_gid(db, gid, vec!["title".to_string()], 5, None, None, None)
-        //     .await
-        //     .unwrap();
-        // assert_eq!(res.len(), 5);
-        // assert_eq!(res[4].gid, docs[5].gid);
-        // assert_eq!(res[4].cid, docs[5].cid);
-        // assert_eq!(res[4].language, docs[5].language);
-        // assert_eq!(res[4].version, docs[5].version);
-
-        // let res = Publication::list_by_gid(
-        //     db,
-        //     gid,
-        //     vec!["title".to_string()],
-        //     5,
-        //     Some(docs[5].cid),
-        //     None,
-        //     None,
-        // )
-        // .await
-        // .unwrap();
-        // assert_eq!(res.len(), 5);
-        // assert_eq!(res[4].gid, docs[0].gid);
-        // assert_eq!(res[4].cid, docs[0].cid);
-        // assert_eq!(res[4].language, docs[0].language);
-        // assert_eq!(res[4].version, docs[0].version);
-
-        // let res = Publication::list_by_gid(
-        //     db,
-        //     gid,
-        //     vec!["title".to_string()],
-        //     5,
-        //     Some(docs[5].cid),
-        //     Some(1),
-        //     None,
-        // )
-        // .await
-        // .unwrap();
-        // assert_eq!(res.len(), 0);
     }
 
     // #[tokio::test(flavor = "current_thread")]
