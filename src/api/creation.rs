@@ -26,7 +26,7 @@ pub struct CreateCreationInput {
     #[validate(url)]
     pub original_url: Option<String>,
     pub genre: Option<Vec<String>>,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: String,
     #[validate(url)]
     pub cover: Option<String>,
