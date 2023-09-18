@@ -225,7 +225,7 @@ pub struct QueryPublicationInputput {
     pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<isolang::Language>,
-    #[validate(range(min = 0, max = 10000))] // 0 means latest
+    #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub fields: Option<String>,
 }
@@ -260,13 +260,55 @@ pub async fn get(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let mut doc = if language == Language::Und || input.version < 1 {
-        db::Publication::find_a_published(&app.scylla, gid, cid, ctx.language.unwrap_or_default())
-            .await?
-    } else {
-        db::Publication::with_pk(gid, cid, language, input.version)
-    };
+    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
+    doc._rating = index.rating;
 
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ImplicitQueryPublicationInputput {
+    pub cid: PackObject<xid::Id>,
+    pub gid: Option<PackObject<xid::Id>>,
+    pub language: Option<PackObject<isolang::Language>>,
+    pub fields: Option<String>,
+}
+
+pub async fn implicit_get(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<ImplicitQueryPublicationInputput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let cid = *input.cid.to_owned();
+    let gid = input.gid.to_owned().unwrap_or_default().unwrap();
+    let mut language = input.language.to_owned().unwrap_or_default().unwrap();
+    if language == Language::Und {
+        language = ctx.language.unwrap_or_default()
+    }
+
+    ctx.set_kvs(vec![
+        ("action", "implicit_get_publication".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_639_3().into()),
+    ])
+    .await;
+
+    let mut index = db::CreationIndex::with_pk(cid);
+    if index.get_one(&app.scylla).await.is_err() {
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
+    }
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
+    }
+
+    let mut doc = db::Publication::get_implicit_published(&app.scylla, gid, cid, language).await?;
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     doc._rating = index.rating;

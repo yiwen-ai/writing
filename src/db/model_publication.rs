@@ -860,27 +860,28 @@ impl Publication {
         Ok(docs)
     }
 
-    pub async fn find_a_published(
+    pub async fn get_implicit_published(
         db: &scylladb::ScyllaDB,
         gid: xid::Id,
         cid: xid::Id,
         language: Language,
     ) -> anyhow::Result<Publication> {
-        let fields = Self::select_fields(
-            vec![
-                "status".to_string(),
-                "updated_at".to_string(),
-                "from_language".to_string(),
-            ],
-            true,
-        )?;
+        let fields = Self::select_fields(vec!["from_language".to_string()], true)?;
         let query_size = 1000i32;
 
-        let query = format!(
+        let rows = if gid.is_zero() {
+            let query = format!(
+                "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                fields.clone().join(","));
+            let params = (cid.to_cql(), 2, query_size);
+            db.execute_iter(query, params).await?
+        } else {
+            let query = format!(
             "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
             fields.clone().join(","));
-        let params = (gid.to_cql(), cid.to_cql(), 2i8, query_size);
-        let rows = db.execute_iter(query, params).await?;
+            let params = (gid.to_cql(), cid.to_cql(), 2i8, query_size);
+            db.execute_iter(query, params).await?
+        };
 
         let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
         for row in rows {
