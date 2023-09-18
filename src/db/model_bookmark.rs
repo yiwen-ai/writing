@@ -214,7 +214,7 @@ impl Bookmark {
         };
 
         let query = format!(
-            "SELECT {} FROM bookmark WHERE uid=? AND id<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM bookmark WHERE uid=? AND id<? LIMIT ? USING TIMEOUT 3s",
             fields.clone().join(",")
         );
         let params = (uid.to_cql(), token.to_cql(), page_size as i32);
@@ -242,7 +242,7 @@ impl Bookmark {
         let fields = Self::select_fields(select_fields, true)?;
 
         let query = format!(
-            "SELECT {} FROM bookmark WHERE uid=? AND cid=? LIMIT ? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM bookmark WHERE uid=? AND cid=? LIMIT ? USING TIMEOUT 3s",
             fields.clone().join(",")
         );
         let params = (uid.to_cql(), cid.to_cql(), 1000i32);
@@ -272,7 +272,7 @@ impl Bookmark {
     ) -> anyhow::Result<Self> {
         let fields = Self::select_fields(select_fields, false)?;
         let query = format!(
-            "SELECT {} FROM bookmark WHERE uid=? AND cid=? AND gid=? AND language=? LIMIT 1 ALLOW FILTERING BYPASS CACHE",
+            "SELECT {} FROM bookmark WHERE uid=? AND cid=? AND gid=? AND language=? LIMIT 1 ALLOW FILTERING",
             fields.join(",")
         );
         let params = (uid.to_cql(), cid.to_cql(), gid.to_cql(), language.to_cql());

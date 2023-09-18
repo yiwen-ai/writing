@@ -661,18 +661,18 @@ impl Publication {
 
         let query = if status.is_none() {
             format!(
-            "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+            "SELECT {} FROM publication WHERE gid=? AND cid<? AND status>=0 LIMIT ? ALLOW FILTERING USING TIMEOUT 3s", fields.clone().join(","))
         } else {
             format!(
-            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid<? LIMIT ? BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid<? LIMIT ? USING TIMEOUT 3s", fields.clone().join(","))
         };
 
         let tail_query = if status.is_none() {
             format!(
-            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=0 ALLOW FILTERING USING TIMEOUT 3s", fields.clone().join(","))
         } else {
             format!(
-            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s", fields.clone().join(","))
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? ALLOW FILTERING USING TIMEOUT 3s", fields.clone().join(","))
         };
 
         let mut docs_set: HashSet<(xid::Id, Language, i16)> = HashSet::new();
@@ -762,13 +762,14 @@ impl Publication {
         let secs: u32 = 3600 * 24;
         let mut res: Vec<Publication> = Vec::new();
         let query = format!(
-            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? USING TIMEOUT 3s",
             fields.clone().join(","));
 
         let mut end_id = if let Some(cid) = page_token {
             cid
         } else {
-            let unix_ts = (unix_ms() / 1000) as u32;
+            let mut unix_ts = (unix_ms() / 1000) as u32;
+            unix_ts = unix_ts - (unix_ts / 600);
             let mut end_id = xid::Id::default();
             end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
             end_id
@@ -839,7 +840,7 @@ impl Publication {
         let query_size = 1000i32;
 
         let query = format!(
-            "SELECT {} FROM publication WHERE cid=? AND status>=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM publication WHERE cid=? AND status>=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
             fields.clone().join(","));
         let params = (cid.to_cql(), from_status, query_size);
         let rows = db.execute_iter(query, params).await?;
@@ -871,13 +872,13 @@ impl Publication {
 
         let rows = if gid.is_zero() {
             let query = format!(
-                "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+                "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
                 fields.clone().join(","));
             let params = (cid.to_cql(), 2i8, query_size);
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
-            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
             fields.clone().join(","));
             let params = (gid.to_cql(), cid.to_cql(), 2i8, query_size);
             db.execute_iter(query, params).await?
@@ -952,7 +953,8 @@ impl Publication {
         db: &scylladb::ScyllaDB,
         gid: xid::Id,
     ) -> anyhow::Result<usize> {
-        let query = "SELECT cid FROM publication WHERE gid=? AND status=? GROUP BY cid BYPASS CACHE USING TIMEOUT 3s";
+        let query =
+            "SELECT cid FROM publication WHERE gid=? AND status=? GROUP BY cid USING TIMEOUT 3s";
         let params = (gid.to_cql(), 2i8);
         let rows = db.execute_iter(query, params).await?;
         Ok(rows.len())
