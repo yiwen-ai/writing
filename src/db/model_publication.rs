@@ -860,6 +860,60 @@ impl Publication {
         Ok(docs)
     }
 
+    pub async fn find_a_published(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+        cid: xid::Id,
+        language: Language,
+    ) -> anyhow::Result<Publication> {
+        let fields = Self::select_fields(
+            vec![
+                "status".to_string(),
+                "updated_at".to_string(),
+                "from_language".to_string(),
+            ],
+            true,
+        )?;
+        let query_size = 1000i32;
+
+        let query = format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
+            fields.clone().join(","));
+        let params = (gid.to_cql(), cid.to_cql(), 2i8, query_size);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Publication::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            docs.push(doc);
+        }
+        let mut res: Vec<&Publication> =
+            docs.iter().filter(|doc| doc.language == language).collect();
+        if res.is_empty() {
+            res = docs
+                .iter()
+                .filter(|doc| doc.from_language == doc.language)
+                .collect();
+        }
+        if res.is_empty() {
+            res = docs.iter().collect();
+        }
+        if res.is_empty() {
+            return Err(HTTPError::new(
+                404,
+                format!("Publication not found, gid: {}, cid: {}", gid, cid),
+            )
+            .into());
+        }
+
+        res.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        Ok(res.remove(0).to_owned())
+    }
+
     pub async fn list_published_by_url(
         db: &scylladb::ScyllaDB,
         url: String,

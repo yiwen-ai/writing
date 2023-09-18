@@ -60,7 +60,10 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
     let lang = if lang.is_empty() {
         None
     } else {
-        Language::from_str(&lang.to_lowercase()).ok()
+        match Language::from_str(&lang.to_lowercase()).ok() {
+            Some(la) if la != Language::Und => Some(la),
+            _ => None,
+        }
     };
 
     let uid = xid::Id::from_str(&user).unwrap_or_default();

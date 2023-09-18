@@ -260,7 +260,13 @@ pub async fn get(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
+    let mut doc = if language == Language::Und || input.version < 1 {
+        db::Publication::find_a_published(&app.scylla, gid, cid, ctx.language.unwrap_or_default())
+            .await?
+    } else {
+        db::Publication::with_pk(gid, cid, language, input.version)
+    };
+
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     doc._rating = index.rating;
