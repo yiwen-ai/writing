@@ -873,7 +873,7 @@ impl Publication {
             let query = format!(
                 "SELECT {} FROM publication WHERE cid=? AND status=? LIMIT ? ALLOW FILTERING BYPASS CACHE USING TIMEOUT 3s",
                 fields.clone().join(","));
-            let params = (cid.to_cql(), 2, query_size);
+            let params = (cid.to_cql(), 2i8, query_size);
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
