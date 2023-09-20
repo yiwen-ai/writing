@@ -90,7 +90,7 @@ pub async fn middleware<B>(mut req: Request<B>, next: Next<B>) -> Response {
         rating = rating,
         status = status,
         start = ctx.unix_ms,
-        language = ctx.language.map_or("".to_string(), |l| l.to_string()),
+        language = ctx.language.map_or("", |l| l.to_639_3()),
         elapsed = ctx.start.elapsed().as_millis() as u64,
         ctype = ct,
         encoding = ce,

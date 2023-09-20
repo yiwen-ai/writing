@@ -769,14 +769,14 @@ impl Publication {
             cid
         } else {
             let mut unix_ts = (unix_ms() / 1000) as u32;
-            unix_ts = unix_ts - (unix_ts / 600);
+            unix_ts = unix_ts - (unix_ts % 600);
             let mut end_id = xid::Id::default();
             end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
             end_id
         };
 
         let mut i = 0i8;
-        while i < 7 {
+        while i < 14 {
             let raw = end_id.as_bytes();
             let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
             let mut start_id = xid::Id::default();
