@@ -762,7 +762,7 @@ impl Publication {
         let secs: u32 = 3600 * 24;
         let mut res: Vec<Publication> = Vec::new();
         let query = format!(
-            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? USING TIMEOUT 3s",
+            "SELECT {} FROM publication WHERE gid=? AND status=? AND cid>=? AND cid<? LIMIT 1000 USING TIMEOUT 3s",
             fields.clone().join(","));
 
         let mut end_id = if let Some(cid) = page_token {
@@ -776,7 +776,7 @@ impl Publication {
         };
 
         let mut i = 0i8;
-        while i < 7 {
+        while i < 14 {
             let raw = end_id.as_bytes();
             let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
             let mut start_id = xid::Id::default();
@@ -821,7 +821,9 @@ impl Publication {
             end_id = start_id;
         }
 
-        Ok((res, None))
+        let next = if res.is_empty() { None } else { Some(end_id) };
+        res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+        Ok((res, next))
     }
 
     pub async fn list_published_by_cid(
