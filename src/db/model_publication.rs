@@ -776,7 +776,7 @@ impl Publication {
         };
 
         let mut i = 0i8;
-        while i < 14 {
+        while i < 7 {
             let raw = end_id.as_bytes();
             let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
             let mut start_id = xid::Id::default();
@@ -810,7 +810,9 @@ impl Publication {
                 }
             }
 
-            if !res.is_empty() {
+            // result should >= 6 for first page.
+            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            {
                 res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
                 return Ok((res, Some(start_id)));
             }
