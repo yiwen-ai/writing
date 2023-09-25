@@ -136,6 +136,18 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route("/list_latest", routing::post(api::publication::list_latest)),
         )
         .nest(
+            "/v1/message",
+            Router::new()
+                .route(
+                    "/",
+                    routing::post(api::message::create)
+                        .get(api::message::get)
+                        .patch(api::message::update)
+                        .delete(api::message::delete),
+                )
+                .route("/update_i18n", routing::post(api::message::update_i18n)),
+        )
+        .nest(
             "/v1/bookmark",
             Router::new()
                 .route(
