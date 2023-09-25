@@ -68,6 +68,7 @@ pub struct DocumentOutput {
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
     pub version: i16,
+    pub updated_at: i64,
     pub kind: i8, // 0: creation, 1: publication
     pub title: String,
     pub summary: String,
@@ -81,6 +82,7 @@ impl DocumentOutput {
             cid: to.with(cid.unwrap()),
             language: to.with(language.unwrap()),
             version: val.version,
+            updated_at: val.updated_at,
             kind: val.kind,
             title: val.title.unwrap_or_default(),
             summary: val.summary.unwrap_or_default(),
@@ -116,6 +118,7 @@ pub struct SearchOutput {
 //         "language",
 //         "kind",
 //         "version",
+//         "updated_at",
 //         "title",
 //         "summary"
 //     ],

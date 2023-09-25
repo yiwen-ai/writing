@@ -444,14 +444,13 @@ impl Creation {
         }
 
         let mut doc = Content::with_pk(self.content);
-        doc.update_content(db, self.version + 1, self.language, content.clone())
+        doc.update_content(db, self.version, self.language, content.clone())
             .await?;
 
         let query =
-            "UPDATE creation SET updated_at=?,version=?,language=? WHERE gid=? AND id=? IF updated_at=?";
+            "UPDATE creation SET updated_at=?,language=? WHERE gid=? AND id=? IF updated_at=?";
         let params = (
             doc.updated_at,
-            doc.version,
             self.language.to_cql(),
             self.gid.to_cql(),
             self.id.to_cql(),
@@ -468,7 +467,6 @@ impl Creation {
         }
 
         self.updated_at = doc.updated_at;
-        self.version = doc.version;
         self._content = content;
         Ok(true)
     }
