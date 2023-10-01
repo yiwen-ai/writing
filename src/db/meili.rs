@@ -184,7 +184,8 @@ impl MeiliSearch {
             Space::Pub(some_gid) => (SearchQuery::new(&self.ipublication), some_gid),
         };
 
-        sq.with_query(q).with_limit(10);
+        let limit = if q.is_empty() { 1000 } else { 20 };
+        sq.with_query(q).with_limit(limit);
         let mut filters: Vec<&str> = Vec::new();
         let f = if let Some(gid) = gid {
             format!("gid = {}", gid)
