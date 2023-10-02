@@ -1153,7 +1153,7 @@ impl Publication {
         let status_cond = if from_status == 1 {
             "status=1"
         } else {
-            "status IN (0,1)"
+            "status>=0 AND status<2"
         };
 
         let query = format!(
