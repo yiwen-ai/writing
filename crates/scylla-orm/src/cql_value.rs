@@ -28,6 +28,18 @@ impl ToCqlVal for String {
     }
 }
 
+impl FromCqlVal for bool {
+    fn from_cql(cql_val: &CqlValue) -> Result<Self, FromCqlValError> {
+        cql_to_rust::FromCqlVal::from_cql(cql_val.to_owned())
+    }
+}
+
+impl ToCqlVal for bool {
+    fn to_cql(&self) -> CqlValue {
+        CqlValue::Boolean(self.to_owned())
+    }
+}
+
 impl FromCqlVal for i8 {
     fn from_cql(cql_val: &CqlValue) -> Result<Self, FromCqlValError> {
         cql_to_rust::FromCqlVal::from_cql(cql_val.to_owned())

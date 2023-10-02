@@ -1,6 +1,6 @@
 [package]
 name = "writing"
-version = "1.0.5"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.64"
 description = ""
@@ -10,7 +10,7 @@ repository = "https://github.com/yiwen-ai/writing"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "cmd/*"]
 
 [workspace.dependencies]
 anyhow = "1"
@@ -114,3 +114,6 @@ hex-literal = "0.4.1"
 
 [profile.release]
 lto = true
+
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-unknown-linux-gnu-gcc"

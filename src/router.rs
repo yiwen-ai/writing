@@ -115,6 +115,26 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 ), // patch content
         )
         .nest(
+            "/beta/publication",
+            Router::new()
+                .route(
+                    "/implicit_get",
+                    routing::get(api::publication::implicit_get_beta),
+                )
+                .route(
+                    "/publish",
+                    routing::get(api::publication::get_publish_list_beta),
+                )
+                .route(
+                    "/count_publish",
+                    routing::post(api::publication::count_publish_beta),
+                )
+                .route(
+                    "/list_by_gids",
+                    routing::post(api::publication::list_by_gids_beta),
+                ),
+        )
+        .nest(
             "/v1/bookmark",
             Router::new()
                 .route(

@@ -10,9 +10,10 @@ pub mod scylladb;
 
 pub use model_bookmark::Bookmark;
 pub use model_creation::{Creation, CreationIndex};
-pub use model_publication::Publication;
+pub use model_publication::{Publication, PublicationIndex};
 
 pub static USER_JARVIS: &str = "0000000000000jarvis0"; // system user
 pub static USER_ANON: &str = "000000000000000anon0"; // anonymous user
 pub static DEFAULT_MODEL: &str = "gpt-3.5"; // default model
 pub static MAX_ID: xid::Id = xid::Id([255; 12]);
+pub static MIN_ID: xid::Id = xid::Id([0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255]);

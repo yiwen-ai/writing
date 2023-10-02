@@ -316,6 +316,48 @@ pub async fn implicit_get(
     Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
 }
 
+pub async fn implicit_get_beta(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<ImplicitQueryPublicationInputput>,
+) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let cid = *input.cid.to_owned();
+    let gid = input.gid.to_owned().unwrap_or_default().unwrap();
+    let mut language = input.language.to_owned().unwrap_or_default().unwrap();
+    if language == Language::Und {
+        language = ctx.language.unwrap_or_default()
+    }
+
+    ctx.set_kvs(vec![
+        ("action", "implicit_get_publication".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("language", language.to_639_3().into()),
+    ])
+    .await;
+
+    let mut index = db::CreationIndex::with_pk(cid);
+    if index.get_one(&app.scylla).await.is_err() {
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
+    }
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
+    }
+
+    let doc_i =
+        db::PublicationIndex::get_implicit_published(&app.scylla, gid, cid, language).await?;
+    let mut doc: db::Publication = doc_i.into();
+    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
+        .await?;
+    doc._rating = index.rating;
+
+    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+}
+
 pub async fn list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
@@ -404,6 +446,41 @@ pub async fn list_by_gids(
     }))
 }
 
+pub async fn list_by_gids_beta(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<GidsPagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    ctx.set_kvs(vec![
+        ("action", "list_publications_by_gids".into()),
+        ("gids", input.gids.len().into()),
+    ])
+    .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let (res, next_page_token) = db::PublicationIndex::list_by_gids(
+        &app.scylla,
+        input.gids.into_iter().map(|v| v.unwrap()).collect(),
+        token_to_xid(&input.page_token),
+        ctx.language,
+    )
+    .await?;
+
+    let docs = db::Publication::batch_get(&app.scylla, res, fields).await?;
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: to.with_option(token_from_xid(next_page_token)),
+        result: docs
+            .iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
 pub async fn get_publish_list(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
@@ -442,6 +519,57 @@ pub async fn get_publish_list(
     )))
 }
 
+pub async fn get_publish_list_beta(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryGidCid>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = *input.gid.to_owned();
+    let cid = *input.cid.to_owned();
+    let status = input.status.unwrap_or(2);
+    ctx.set_kvs(vec![
+        ("action", "get_publish_list".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("status", status.into()),
+    ])
+    .await;
+
+    let mut index = db::CreationIndex::with_pk(cid);
+    if index.get_one(&app.scylla).await.is_err() {
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
+    }
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
+    }
+
+    let published = db::PublicationIndex::list_published_by_cid(&app.scylla, cid).await?;
+    let mut docs = db::Publication::batch_get(
+        &app.scylla,
+        published,
+        vec![
+            "status".to_string(),
+            "updated_at".to_string(),
+            "from_language".to_string(),
+            "title".to_string(),
+        ],
+    )
+    .await?;
+    let res = db::Publication::list_non_publish_by_cid(&app.scylla, gid, cid, status).await?;
+
+    docs.extend_from_slice(&res);
+    ctx.set("total_size", docs.len().into()).await;
+    Ok(to.with(SuccessResponse::new(
+        docs.iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    )))
+}
+
 pub async fn count_publish(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
@@ -459,6 +587,26 @@ pub async fn count_publish(
     .await;
 
     let res = db::Publication::count_published_by_gid(&app.scylla, gid).await?;
+    Ok(to.with(SuccessResponse::new(res)))
+}
+
+pub async fn count_publish_beta(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<GIDPagination>,
+) -> Result<PackObject<SuccessResponse<usize>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = input.gid.unwrap();
+    ctx.set_kvs(vec![
+        ("action", "count_publish".into()),
+        ("gid", gid.to_string().into()),
+    ])
+    .await;
+
+    let res = db::PublicationIndex::count_published_by_gid(&app.scylla, gid).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
 

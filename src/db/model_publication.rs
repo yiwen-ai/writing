@@ -7,10 +7,267 @@ use scylla_orm_macros::CqlOrm;
 use crate::db::{
     meili,
     scylladb::{self, extract_applied},
-    Content, Creation, DEFAULT_MODEL, MAX_ID,
+    Content, Creation, DEFAULT_MODEL, MAX_ID, MIN_ID,
 };
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
+
+#[derive(Debug, Default, Clone, CqlOrm)]
+pub struct PublicationIndex {
+    pub cid: xid::Id,
+    pub language: Language,
+    pub original: bool,
+    pub version: i16,
+    pub gid: xid::Id,
+    pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
+}
+
+impl From<PublicationIndex> for Publication {
+    fn from(doc: PublicationIndex) -> Self {
+        Self::with_pk(doc.gid, doc.cid, doc.language, doc.version)
+    }
+}
+
+impl PublicationIndex {
+    pub fn with_pk(cid: xid::Id, language: Language) -> Self {
+        Self {
+            cid,
+            language,
+            ..Default::default()
+        }
+    }
+
+    pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
+        self._fields = Self::fields();
+
+        let query = format!(
+            "SELECT {} FROM publication_index WHERE cid=? AND language=? LIMIT 1",
+            self._fields.join(",")
+        );
+        let params = (self.cid.to_cql(), self.language.to_cql());
+        let res = db.execute(query, params).await?.single_row()?;
+
+        let mut cols = ColumnsMap::with_capacity(self._fields.len());
+        cols.fill(res, &self._fields)?;
+        self.fill(&cols);
+
+        Ok(())
+    }
+
+    pub async fn upsert(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+        let fields = Self::fields();
+        self._fields = fields.clone();
+
+        let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
+        let mut params: Vec<&CqlValue> = Vec::with_capacity(fields.len());
+        let cols = self.to();
+
+        for field in &fields {
+            cols_name.push(field);
+            vals_name.push("?");
+            params.push(cols.get(field).unwrap());
+        }
+
+        let query = format!(
+            "INSERT INTO publication_index ({}) VALUES ({}) IF NOT EXISTS",
+            cols_name.join(","),
+            vals_name.join(",")
+        );
+
+        let res = db.execute(query, params).await?;
+        if extract_applied(res) {
+            return Ok(true);
+        }
+
+        let query =
+            "UPDATE publication_index SET version=?,gid=? WHERE cid=? AND language=? IF version<?";
+        let params = (
+            self.version,
+            self.gid.to_cql(),
+            self.cid.to_cql(),
+            self.language.to_cql(),
+            self.version,
+        );
+        let res = db.execute(query, params).await?;
+        if extract_applied(res) {
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    pub async fn list_by_gids(
+        db: &scylladb::ScyllaDB,
+        gids: Vec<xid::Id>,
+        page_token: Option<xid::Id>,
+        language: Option<Language>,
+    ) -> anyhow::Result<(Vec<PublicationIndex>, Option<xid::Id>)> {
+        let fields = Self::fields();
+
+        let secs: u32 = 3600 * 24;
+        let mut res: Vec<PublicationIndex> = Vec::new();
+        let query = format!(
+            "SELECT {} FROM publication_index WHERE gid=? AND cid>=? AND cid<? LIMIT 1000 USING TIMEOUT 3s",
+            fields.clone().join(","));
+
+        let mut end_id = if let Some(cid) = page_token {
+            cid
+        } else {
+            let mut unix_ts = (unix_ms() / 1000) as u32;
+            unix_ts = unix_ts - (unix_ts % 600);
+            let mut end_id = xid::Id::default();
+            end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
+            end_id
+        };
+
+        let mut i = 0i8;
+        while i < 14 {
+            let raw = end_id.as_bytes();
+            let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
+            let mut start_id = xid::Id::default();
+            start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
+
+            for gid in gids.iter() {
+                if gid <= &MIN_ID {
+                    continue;
+                }
+
+                let params = (gid.to_cql(), start_id.to_cql(), end_id.to_cql());
+                let rows = db.execute_iter(query.as_str(), params).await?;
+                for row in rows {
+                    let mut doc = PublicationIndex::default();
+                    let mut cols = ColumnsMap::with_capacity(fields.len());
+                    cols.fill(row, &fields)?;
+                    doc.fill(&cols);
+                    doc._fields = fields.clone();
+                    if res.is_empty() {
+                        res.push(doc);
+                    } else {
+                        let prev = res.last_mut().unwrap();
+                        if prev.cid != doc.cid {
+                            res.push(doc);
+                        } else if prev.language != doc.language {
+                            match language {
+                                // prefer language match
+                                Some(lang) if lang == doc.language => *prev = doc,
+                                // or original language
+                                None if doc.original => *prev = doc,
+                                _ => {} // ignore
+                            }
+                        }
+                    }
+                }
+            }
+
+            // result should >= 6 for first page.
+            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            {
+                res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+                return Ok((res, Some(start_id)));
+            }
+
+            i += 1;
+            end_id = start_id;
+        }
+
+        let next = if res.is_empty() { None } else { Some(end_id) };
+        res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+        Ok((res, next))
+    }
+
+    pub async fn list_published_by_cid(
+        db: &scylladb::ScyllaDB,
+        cid: xid::Id,
+    ) -> anyhow::Result<Vec<PublicationIndex>> {
+        let fields = Self::fields();
+
+        let query = format!(
+            "SELECT {} FROM publication_index WHERE cid=? LIMIT 200 USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (cid.to_cql(),);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut docs: Vec<PublicationIndex> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = PublicationIndex::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            docs.push(doc);
+        }
+        docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        Ok(docs)
+    }
+
+    pub async fn get_implicit_published(
+        db: &scylladb::ScyllaDB,
+        cid: xid::Id,
+        gid: xid::Id,
+        language: Language,
+    ) -> anyhow::Result<PublicationIndex> {
+        let fields = Self::fields();
+
+        let rows = if gid <= MIN_ID {
+            let query = format!(
+                "SELECT {} FROM publication_index WHERE cid=? LIMIT 200 USING TIMEOUT 3s",
+                fields.clone().join(",")
+            );
+            let params = (cid.to_cql(),);
+            db.execute_iter(query, params).await?
+        } else {
+            let query = format!(
+            "SELECT {} FROM publication_index WHERE cid=? AND gid=? LIMIT 200 ALLOW FILTERING USING TIMEOUT 3s",
+            fields.clone().join(","));
+            let params = (cid.to_cql(), gid.to_cql());
+            db.execute_iter(query, params).await?
+        };
+
+        let mut docs: Vec<PublicationIndex> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = PublicationIndex::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            docs.push(doc);
+        }
+        let mut res: Vec<&PublicationIndex> =
+            docs.iter().filter(|doc| doc.language == language).collect();
+        if res.is_empty() {
+            res = docs.iter().filter(|doc| doc.original).collect();
+        }
+        if res.is_empty() {
+            res = docs.iter().collect();
+        }
+        if res.is_empty() {
+            return Err(HTTPError::new(
+                404,
+                format!("Publication not found, gid: {}, cid: {}", gid, cid),
+            )
+            .into());
+        }
+
+        res.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        Ok(res.remove(0).to_owned())
+    }
+
+    pub async fn count_published_by_gid(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+    ) -> anyhow::Result<usize> {
+        if gid <= MIN_ID {
+            return Ok(0);
+        }
+
+        let query = "SELECT cid FROM publication_index WHERE gid=? GROUP BY cid USING TIMEOUT 3s";
+        let params = (gid.to_cql(),);
+        let rows = db.execute_iter(query, params).await?;
+        Ok(rows.len())
+    }
+}
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Publication {
@@ -226,6 +483,40 @@ impl Publication {
         Ok(())
     }
 
+    pub async fn batch_get(
+        db: &scylladb::ScyllaDB,
+        list: Vec<PublicationIndex>,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Publication>> {
+        let mut fields = Self::select_fields(select_fields, false)?;
+
+        if let Some(i) = fields.iter().position(|v| v == &"content".to_string()) {
+            fields.remove(i);
+        };
+        let query = format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND language=? AND version=? LIMIT 1",
+            fields.join(",")
+        );
+        let mut res: Vec<Publication> = Vec::with_capacity(list.len());
+        for v in list {
+            let params = (
+                v.gid.to_cql(),
+                v.cid.to_cql(),
+                v.language.to_cql(),
+                v.version,
+            );
+            let row = db.execute(query.as_str(), params).await?.single_row()?;
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            let mut doc = Publication::default();
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
+
     pub async fn get_deleted(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
         let fields = Self::fields();
         self._fields = fields.clone();
@@ -261,6 +552,7 @@ impl Publication {
                 "status".to_string(),
                 "updated_at".to_string(),
                 "language".to_string(),
+                "from_language".to_string(),
             ],
         )
         .await?;
@@ -303,6 +595,18 @@ impl Publication {
                 ),
             )
             .into());
+        }
+
+        if status == 2 {
+            let mut index = PublicationIndex {
+                cid: self.cid,
+                language: self.language,
+                original: self.language == self.from_language,
+                version: self.version,
+                gid: self.gid,
+                ..Default::default()
+            };
+            index.upsert(db).await?;
         }
 
         self.updated_at = new_updated_at;
@@ -824,6 +1128,51 @@ impl Publication {
         let next = if res.is_empty() { None } else { Some(end_id) };
         res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
         Ok((res, next))
+    }
+
+    pub async fn list_non_publish_by_cid(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+        cid: xid::Id,
+        from_status: i8,
+    ) -> anyhow::Result<Vec<Publication>> {
+        if gid <= MIN_ID {
+            return Ok(Vec::new());
+        }
+
+        let fields = Self::select_fields(
+            vec![
+                "status".to_string(),
+                "updated_at".to_string(),
+                "from_language".to_string(),
+                "title".to_string(),
+            ],
+            true,
+        )?;
+
+        let status_cond = if from_status == 1 {
+            "status=1"
+        } else {
+            "status IN (0,1)"
+        };
+
+        let query = format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND {} LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
+            fields.clone().join(","), status_cond);
+        let params = (gid.to_cql(), cid.to_cql());
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Publication::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            docs.push(doc);
+        }
+        docs.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        Ok(docs)
     }
 
     pub async fn list_published_by_cid(
