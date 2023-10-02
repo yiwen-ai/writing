@@ -20,6 +20,3 @@ fix:
 
 docker:
 	@docker build -t yiwen-ai/writing:latest .
-
-build-cmd:
-	@docker build --output target -f Dockerfile.cmd .
