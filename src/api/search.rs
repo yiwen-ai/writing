@@ -43,6 +43,7 @@ pub async fn search(
         .meili
         .search(meili::Space::Pub(gid), lang, &q, &to)
         .await?;
+    ctx.set("result", res.hits.len().into()).await;
     Ok(to.with(SuccessResponse::new(res)))
 }
 
@@ -70,6 +71,7 @@ pub async fn group_search(
         .meili
         .search(meili::Space::Group(gid), lang, q, &to)
         .await?;
+    ctx.set("result", res.hits.len().into()).await;
     Ok(to.with(SuccessResponse::new(res)))
 }
 
@@ -146,5 +148,18 @@ pub async fn original_search(
             summary: doc.summary,
         });
     }
+    ctx.set("result", res.hits.len().into()).await;
     Ok(to.with(SuccessResponse::new(res)))
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     #[test]
+//     fn test_it_q() {
+//         let q: Vec<&str> = "".split_whitespace().collect();
+//         let q = q.join(" ");
+//         println!("q len: {}", q.len())
+//     }
+// }
