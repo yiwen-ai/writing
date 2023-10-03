@@ -348,9 +348,9 @@ pub async fn implicit_get_beta(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let doc_i =
-        db::PublicationIndex::get_implicit_published(&app.scylla, gid, cid, language).await?;
-    let mut doc: db::Publication = doc_i.into();
+    let idoc =
+        db::PublicationIndex::get_implicit_published(&app.scylla, cid, gid, language).await?;
+    let mut doc: db::Publication = idoc.into();
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
     doc._rating = index.rating;

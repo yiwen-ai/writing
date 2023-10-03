@@ -1,5 +1,5 @@
 use futures::stream::StreamExt;
-use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
+use scylla_orm::{ColumnsMap, ToCqlVal};
 use structured_logger::{async_json::new_writer, Builder};
 use tokio::io;
 use writing::{conf, db};
@@ -66,12 +66,7 @@ async fn main() -> anyhow::Result<()> {
             let res = idoc.upsert(&sess).await?;
             if res {
                 synced += 1;
-                println!(
-                    "doc: {} {} {}",
-                    idoc.cid.to_string(),
-                    idoc.language.to_string(),
-                    idoc.version
-                );
+                println!("doc: {} {} {}", idoc.cid, idoc.language, idoc.version);
             }
         }
     }

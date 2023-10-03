@@ -14,6 +14,7 @@ use axum_web::erring::HTTPError;
 
 #[derive(Debug, Default, Clone, CqlOrm)]
 pub struct PublicationIndex {
+    pub day: i32,
     pub cid: xid::Id,
     pub language: Language,
     pub original: bool,
@@ -28,9 +29,16 @@ impl From<PublicationIndex> for Publication {
     }
 }
 
+pub fn xid_day(xid: xid::Id) -> i32 {
+    let raw = xid.as_bytes();
+    let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
+    (unix_ts / (3600 * 24)) as i32
+}
+
 impl PublicationIndex {
     pub fn with_pk(cid: xid::Id, language: Language) -> Self {
         Self {
+            day: xid_day(cid),
             cid,
             language,
             ..Default::default()
@@ -39,12 +47,13 @@ impl PublicationIndex {
 
     pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
         self._fields = Self::fields();
+        self.day = xid_day(self.cid);
 
         let query = format!(
-            "SELECT {} FROM publication_index WHERE cid=? AND language=? LIMIT 1",
+            "SELECT {} FROM pub_index WHERE day=? AND cid=? AND language=? LIMIT 1",
             self._fields.join(",")
         );
-        let params = (self.cid.to_cql(), self.language.to_cql());
+        let params = (self.day, self.cid.to_cql(), self.language.to_cql());
         let res = db.execute(query, params).await?.single_row()?;
 
         let mut cols = ColumnsMap::with_capacity(self._fields.len());
@@ -57,6 +66,7 @@ impl PublicationIndex {
     pub async fn upsert(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
         let fields = Self::fields();
         self._fields = fields.clone();
+        self.day = xid_day(self.cid);
 
         let mut cols_name: Vec<&str> = Vec::with_capacity(fields.len());
         let mut vals_name: Vec<&str> = Vec::with_capacity(fields.len());
@@ -70,7 +80,7 @@ impl PublicationIndex {
         }
 
         let query = format!(
-            "INSERT INTO publication_index ({}) VALUES ({}) IF NOT EXISTS",
+            "INSERT INTO pub_index ({}) VALUES ({}) IF NOT EXISTS",
             cols_name.join(","),
             vals_name.join(",")
         );
@@ -80,11 +90,11 @@ impl PublicationIndex {
             return Ok(true);
         }
 
-        let query =
-            "UPDATE publication_index SET version=?,gid=? WHERE cid=? AND language=? IF version<?";
+        let query = "UPDATE pub_index SET version=?,gid=? WHERE day=? AND cid=? AND language=? IF version<?";
         let params = (
             self.version,
             self.gid.to_cql(),
+            self.day,
             self.cid.to_cql(),
             self.language.to_cql(),
             self.version,
@@ -105,35 +115,26 @@ impl PublicationIndex {
     ) -> anyhow::Result<(Vec<PublicationIndex>, Option<xid::Id>)> {
         let fields = Self::fields();
 
-        let secs: u32 = 3600 * 24;
         let mut res: Vec<PublicationIndex> = Vec::new();
         let query = format!(
-            "SELECT {} FROM publication_index WHERE gid=? AND cid>=? AND cid<? LIMIT 1000 USING TIMEOUT 3s",
-            fields.clone().join(","));
+            "SELECT {} FROM pub_index WHERE day=? AND gid=? LIMIT 1000 USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
 
-        let mut end_id = if let Some(cid) = page_token {
-            cid
+        let mut day = if let Some(cid) = page_token {
+            xid_day(cid) - 1
         } else {
-            let mut unix_ts = (unix_ms() / 1000) as u32;
-            unix_ts = unix_ts - (unix_ts % 600);
-            let mut end_id = xid::Id::default();
-            end_id.0[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
-            end_id
+            (unix_ms() / (1000 * 3600 * 24)) as i32
         };
 
         let mut i = 0i8;
-        while i < 14 {
-            let raw = end_id.as_bytes();
-            let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
-            let mut start_id = xid::Id::default();
-            start_id.0[0..=3].copy_from_slice(&(unix_ts - secs).to_be_bytes());
-
+        while day > 0 && i < 30 {
             for gid in gids.iter() {
                 if gid <= &MIN_ID {
                     continue;
                 }
 
-                let params = (gid.to_cql(), start_id.to_cql(), end_id.to_cql());
+                let params = (day, gid.to_cql());
                 let rows = db.execute_iter(query.as_str(), params).await?;
                 for row in rows {
                     let mut doc = PublicationIndex::default();
@@ -163,15 +164,20 @@ impl PublicationIndex {
             // result should >= 6 for first page.
             if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
             {
+                let next_id = res.last().unwrap().cid;
                 res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
-                return Ok((res, Some(start_id)));
+                return Ok((res, Some(next_id)));
             }
 
             i += 1;
-            end_id = start_id;
+            day -= 1;
         }
 
-        let next = if res.is_empty() { None } else { Some(end_id) };
+        let next = if res.is_empty() {
+            None
+        } else {
+            Some(res.last().unwrap().cid)
+        };
         res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
         Ok((res, next))
     }
@@ -183,10 +189,10 @@ impl PublicationIndex {
         let fields = Self::fields();
 
         let query = format!(
-            "SELECT {} FROM publication_index WHERE cid=? LIMIT 200 USING TIMEOUT 3s",
+            "SELECT {} FROM pub_index WHERE day=? AND cid=? LIMIT 200 USING TIMEOUT 3s",
             fields.clone().join(",")
         );
-        let params = (cid.to_cql(),);
+        let params = (xid_day(cid), cid.to_cql());
         let rows = db.execute_iter(query, params).await?;
 
         let mut docs: Vec<PublicationIndex> = Vec::with_capacity(rows.len());
@@ -212,16 +218,16 @@ impl PublicationIndex {
 
         let rows = if gid <= MIN_ID {
             let query = format!(
-                "SELECT {} FROM publication_index WHERE cid=? LIMIT 200 USING TIMEOUT 3s",
+                "SELECT {} FROM pub_index WHERE day=? AND cid=? LIMIT 200 USING TIMEOUT 3s",
                 fields.clone().join(",")
             );
-            let params = (cid.to_cql(),);
+            let params = (xid_day(cid), cid.to_cql());
             db.execute_iter(query, params).await?
         } else {
             let query = format!(
-            "SELECT {} FROM publication_index WHERE cid=? AND gid=? LIMIT 200 ALLOW FILTERING USING TIMEOUT 3s",
+            "SELECT {} FROM pub_index WHERE day=? AND cid=? AND gid=? LIMIT 200 ALLOW FILTERING USING TIMEOUT 3s",
             fields.clone().join(","));
-            let params = (cid.to_cql(), gid.to_cql());
+            let params = (xid_day(cid), cid.to_cql(), gid.to_cql());
             db.execute_iter(query, params).await?
         };
 
@@ -245,7 +251,7 @@ impl PublicationIndex {
         if res.is_empty() {
             return Err(HTTPError::new(
                 404,
-                format!("Publication not found, gid: {}, cid: {}", gid, cid),
+                format!("Publication not found, cid: {},gid: {}", cid, gid),
             )
             .into());
         }
@@ -262,7 +268,7 @@ impl PublicationIndex {
             return Ok(0);
         }
 
-        let query = "SELECT cid FROM publication_index WHERE gid=? GROUP BY cid USING TIMEOUT 3s";
+        let query = "SELECT cid FROM pub_index WHERE gid=? GROUP BY cid USING TIMEOUT 3s";
         let params = (gid.to_cql(),);
         let rows = db.execute_iter(query, params).await?;
         Ok(rows.len())
@@ -1153,7 +1159,7 @@ impl Publication {
         let status_cond = if from_status == 1 {
             "status=1"
         } else {
-            "status>=0 AND status<2"
+            "status IN (0,1)"
         };
 
         let query = format!(

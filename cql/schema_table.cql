@@ -91,21 +91,23 @@ CREATE INDEX publication_cid ON publication (cid);
 CREATE INDEX publication_url ON publication (original_url);
 CREATE INDEX publication_gid_status ON publication ((gid), status);
 
-CREATE TABLE IF NOT EXISTS publication_index (
+CREATE TABLE IF NOT EXISTS pub_index (
+    day        INT,      -- publication day
     cid        BLOB,     -- creation id
     language   TEXT,     -- publication's language, ISO 639-3
     original   BOOLEAN,  -- is original
     version    SMALLINT, -- creation version
     gid        BLOB,     -- group id, publication belong to
-    PRIMARY KEY (cid, language)
-) WITH CLUSTERING ORDER BY (language ASC)
+    PRIMARY KEY (day, cid, language)
+) WITH CLUSTERING ORDER BY (cid DESC, language ASC)
     AND caching = {'enabled': 'true'}
     AND comment = 'published publications index'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX publication_index_gid ON publication_index (gid);
+CREATE INDEX pub_index_day_gid ON pub_index ((day), gid);
+CREATE INDEX pub_index_gid ON pub_index (gid);
 
 CREATE TABLE IF NOT EXISTS bookmark (
     uid         BLOB,        -- user id who create the bookmark, 12 bytes XID
