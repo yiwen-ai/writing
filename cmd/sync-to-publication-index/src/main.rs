@@ -10,7 +10,9 @@ async fn main() -> anyhow::Result<()> {
         .with_target_writer("*", new_writer(io::stdout()))
         .init();
 
-    let nodes = std::env::var("SCYLLA_NODES").unwrap_or_else(|_| "127.0.0.1:9042".into());
+    let nodes = std::env::var("SCYLLA_NODES").expect(
+        "env SCYLLA_NODES required:\nSCYLLA_NODES=127.0.0.1:9042 ./sync-to-publication-index",
+    );
 
     let cfg = conf::ScyllaDB {
         nodes: nodes.split(',').map(|s| s.to_string()).collect(),

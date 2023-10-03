@@ -1,7 +1,7 @@
 use isolang::Language;
 use std::{collections::HashSet, convert::From};
 
-use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
+use scylla_orm::{ColumnsMap, CqlValue, FromCqlVal, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
@@ -268,10 +268,20 @@ impl PublicationIndex {
             return Ok(0);
         }
 
-        let query = "SELECT cid FROM pub_index WHERE gid=? GROUP BY cid USING TIMEOUT 3s";
+        let query = "SELECT cid FROM pub_index WHERE gid=? GROUP BY day, cid USING TIMEOUT 3s";
         let params = (gid.to_cql(),);
         let rows = db.execute_iter(query, params).await?;
-        Ok(rows.len())
+        let mut cids: HashSet<xid::Id> = HashSet::new();
+        for row in rows {
+            if let Some(v) = row.columns.first() {
+                if let Some(v) = v {
+                    let cid = xid::Id::from_cql(v)?;
+                    cids.insert(cid);
+                }
+            }
+        }
+
+        Ok(cids.len())
     }
 }
 
