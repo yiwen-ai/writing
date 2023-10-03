@@ -524,7 +524,7 @@ impl Publication {
             let row = db.execute(query.as_str(), params).await?.single_row()?;
             let mut cols = ColumnsMap::with_capacity(fields.len());
             cols.fill(row, &fields)?;
-            let mut doc = Publication::default();
+            let mut doc = Publication::with_pk(v.gid, v.cid, v.language, v.version);
             doc.fill(&cols);
             doc._fields = fields.clone();
             res.push(doc);
