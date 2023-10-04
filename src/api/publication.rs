@@ -14,7 +14,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
-    QueryGidCid,
+    Pagination, QueryGidCid,
 };
 use crate::db::{self, meili};
 
@@ -465,6 +465,37 @@ pub async fn list_by_gids_beta(
     let (res, next_page_token) = db::PublicationIndex::list_by_gids(
         &app.scylla,
         input.gids.into_iter().map(|v| v.unwrap()).collect(),
+        token_to_xid(&input.page_token),
+        ctx.language,
+    )
+    .await?;
+
+    let docs = db::Publication::batch_get(&app.scylla, res, fields).await?;
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: to.with_option(token_from_xid(next_page_token)),
+        result: docs
+            .iter()
+            .map(|r| PublicationOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+pub async fn list_latest(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    ctx.set_kvs(vec![("action", "list_latest_publications".into())])
+        .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let (res, next_page_token) = db::PublicationIndex::list_latest(
+        &app.scylla,
         token_to_xid(&input.page_token),
         ctx.language,
     )

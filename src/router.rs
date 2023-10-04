@@ -132,7 +132,8 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route(
                     "/list_by_gids",
                     routing::post(api::publication::list_by_gids_beta),
-                ),
+                )
+                .route("/list_latest", routing::post(api::publication::list_latest)),
         )
         .nest(
             "/v1/bookmark",

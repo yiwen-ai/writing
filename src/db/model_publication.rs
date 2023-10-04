@@ -107,6 +107,73 @@ impl PublicationIndex {
         Ok(false)
     }
 
+    pub async fn list_latest(
+        db: &scylladb::ScyllaDB,
+        page_token: Option<xid::Id>,
+        language: Option<Language>,
+    ) -> anyhow::Result<(Vec<PublicationIndex>, Option<xid::Id>)> {
+        let fields = Self::fields();
+
+        let mut res: Vec<PublicationIndex> = Vec::new();
+        let query = format!(
+            "SELECT {} FROM pub_index WHERE day=? LIMIT 1000 USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+
+        let mut day = if let Some(cid) = page_token {
+            xid_day(cid) - 1
+        } else {
+            (unix_ms() / (1000 * 3600 * 24)) as i32
+        };
+
+        let min = (unix_ms() / (1000 * 3600 * 24)) as i32 - 30;
+        while day >= min {
+            let params = (day,);
+            let rows = db.execute_iter(query.as_str(), params).await?;
+            for row in rows {
+                let mut doc = PublicationIndex::default();
+                let mut cols = ColumnsMap::with_capacity(fields.len());
+                cols.fill(row, &fields)?;
+                doc.fill(&cols);
+                doc._fields = fields.clone();
+                if res.is_empty() {
+                    res.push(doc);
+                } else {
+                    let prev = res.last_mut().unwrap();
+                    if prev.cid != doc.cid {
+                        res.push(doc);
+                    } else if prev.language != doc.language {
+                        match language {
+                            // prefer language match
+                            Some(lang) if lang == doc.language => *prev = doc,
+                            // or original language
+                            None if doc.original => *prev = doc,
+                            _ => {} // ignore
+                        }
+                    }
+                }
+            }
+
+            // result should >= 6 for first page.
+            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            {
+                let next_id = res.last().unwrap().cid;
+                res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+                return Ok((res, Some(next_id)));
+            }
+
+            day -= 1;
+        }
+
+        let next = if res.is_empty() {
+            None
+        } else {
+            Some(res.last().unwrap().cid)
+        };
+        res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
+        Ok((res, next))
+    }
+
     pub async fn list_by_gids(
         db: &scylladb::ScyllaDB,
         gids: Vec<xid::Id>,
