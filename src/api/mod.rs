@@ -10,6 +10,7 @@ use crate::db;
 
 pub mod bookmark;
 pub mod creation;
+pub mod message;
 pub mod publication;
 pub mod search;
 

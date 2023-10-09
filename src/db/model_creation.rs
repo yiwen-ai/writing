@@ -616,22 +616,17 @@ impl Creation {
             None => MAX_ID,
         };
 
-        let rows = if status.is_none() {
+        let rows = if let Some(status) = status {
+            let query = format!(
+                "SELECT {} FROM creation WHERE gid=? AND status=? AND id<? LIMIT ? USING TIMEOUT 3s",
+                fields.clone().join(","));
+            let params = (gid.to_cql(), status, token.to_cql(), page_size as i32);
+            db.execute_iter(query, params).await?
+        } else {
             let query = format!(
                 "SELECT {} FROM creation WHERE gid=? AND id<? AND status>=0 LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
                 fields.clone().join(","));
             let params = (gid.to_cql(), token.to_cql(), page_size as i32);
-            db.execute_iter(query, params).await?
-        } else {
-            let query = format!(
-                    "SELECT {} FROM creation WHERE gid=? AND status=? AND id<? LIMIT ? USING TIMEOUT 3s",
-                    fields.clone().join(","));
-            let params = (
-                gid.to_cql(),
-                status.unwrap(),
-                token.to_cql(),
-                page_size as i32,
-            );
             db.execute_iter(query, params).await?
         };
 

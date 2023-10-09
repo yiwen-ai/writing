@@ -7,7 +7,7 @@ use scylla_orm_macros::CqlOrm;
 use crate::db::{
     meili,
     scylladb::{self, extract_applied},
-    Content, Creation, DEFAULT_MODEL, MAX_ID, MIN_ID,
+    xid_day, Content, Creation, DEFAULT_MODEL, MAX_ID, MIN_ID,
 };
 use axum_web::context::unix_ms;
 use axum_web::erring::HTTPError;
@@ -27,12 +27,6 @@ impl From<PublicationIndex> for Publication {
     fn from(doc: PublicationIndex) -> Self {
         Self::with_pk(doc.gid, doc.cid, doc.language, doc.version)
     }
-}
-
-pub fn xid_day(xid: xid::Id) -> i32 {
-    let raw = xid.as_bytes();
-    let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
-    (unix_ts / (3600 * 24)) as i32
 }
 
 impl PublicationIndex {
@@ -340,11 +334,9 @@ impl PublicationIndex {
         let rows = db.execute_iter(query, params).await?;
         let mut cids: HashSet<xid::Id> = HashSet::new();
         for row in rows {
-            if let Some(v) = row.columns.first() {
-                if let Some(v) = v {
-                    let cid = xid::Id::from_cql(v)?;
-                    cids.insert(cid);
-                }
+            if let Some(Some(v)) = row.columns.first() {
+                let cid = xid::Id::from_cql(v)?;
+                cids.insert(cid);
             }
         }
 
@@ -1064,16 +1056,11 @@ impl Publication {
 
         let mut docs_set: HashSet<(xid::Id, Language, i16)> = HashSet::new();
         'label: loop {
-            let mut rows = if status.is_none() {
-                let params = (gid.to_cql(), token.to_cql(), page_size as i32);
+            let mut rows = if let Some(status) = status {
+                let params = (gid.to_cql(), status, token.to_cql(), page_size as i32);
                 db.execute_iter(query.as_str(), params).await?
             } else {
-                let params = (
-                    gid.to_cql(),
-                    status.unwrap(),
-                    token.to_cql(),
-                    page_size as i32,
-                );
+                let params = (gid.to_cql(), token.to_cql(), page_size as i32);
                 db.execute_iter(query.as_str(), params).await?
             };
 
@@ -1088,11 +1075,11 @@ impl Publication {
                 let row = rows.pop().unwrap();
                 cols.fill(row, &fields)?;
                 doc.fill(&cols);
-                let tail_rows = if status.is_none() {
-                    let params = (gid.to_cql(), doc.cid.to_cql());
+                let tail_rows = if let Some(status) = status {
+                    let params = (gid.to_cql(), doc.cid.to_cql(), status);
                     db.execute_iter(tail_query.as_str(), params).await?
                 } else {
-                    let params = (gid.to_cql(), doc.cid.to_cql(), status.unwrap());
+                    let params = (gid.to_cql(), doc.cid.to_cql());
                     db.execute_iter(tail_query.as_str(), params).await?
                 };
                 rows.extend(tail_rows);
