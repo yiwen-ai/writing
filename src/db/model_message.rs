@@ -201,7 +201,7 @@ impl Message {
         cols: ColumnsMap,
         version: i16,
     ) -> anyhow::Result<bool> {
-        let valid_fields = ["context", "message"];
+        let valid_fields = ["context"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
@@ -220,21 +220,13 @@ impl Message {
             )
             .into());
         }
-        if version == 32767 {
-            return Err(
-                HTTPError::new(400, format!("Message version overflow, got {}", version)).into(),
-            );
-        }
 
-        self.day = xid_day(self.id);
-        let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + 2);
-        let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + 2 + 3);
+        let mut set_fields: Vec<String> = Vec::with_capacity(update_fields.len() + 1);
+        let mut params: Vec<CqlValue> = Vec::with_capacity(update_fields.len() + 1 + 3);
 
         let new_updated_at = unix_ms() as i64;
         set_fields.push("updated_at=?".to_string());
-        set_fields.push("version=?".to_string());
         params.push(new_updated_at.to_cql());
-        params.push((version + 1).to_cql());
         for field in &update_fields {
             set_fields.push(format!("{}=?", field));
             params.push(cols.get(field).unwrap().to_owned());
@@ -256,11 +248,11 @@ impl Message {
         }
 
         self.updated_at = new_updated_at;
-        self.version += 1;
+        self._fields = vec!["updated_at".to_string()];
         Ok(true)
     }
 
-    pub async fn update_i18n(
+    pub async fn update_message(
         &mut self,
         db: &scylladb::ScyllaDB,
         lang: String,
@@ -271,7 +263,8 @@ impl Message {
             return Err(HTTPError::new(400, format!("Invalid language: {}", lang)).into());
         }
 
-        self.get_one(db, vec!["version".to_string()]).await?;
+        self.get_one(db, vec!["version".to_string(), "language".to_string()])
+            .await?;
         if self.version != version {
             return Err(HTTPError::new(
                 409,
@@ -283,28 +276,53 @@ impl Message {
             .into());
         }
 
-        self.day = xid_day(self.id);
-        let query = format!(
-            "UPDATE message SET updated_at=?,{}=? WHERE day=? AND id=? IF version=?",
-            lang
-        );
-        let mut params: Vec<CqlValue> = Vec::with_capacity(4);
-
         let new_updated_at = unix_ms() as i64;
-        params.push(new_updated_at.to_cql());
-        params.push(message.to_cql());
-        params.push(self.day.to_cql());
-        params.push(self.id.to_cql());
-        params.push(version.to_cql());
+        let res = if lang == self.language.to_639_3() {
+            if version == 32767 {
+                return Err(HTTPError::new(
+                    400,
+                    format!("Message version overflow, got {}", version),
+                )
+                .into());
+            }
 
-        let res = db.execute(query, params).await?;
+            let query = format!(
+                "UPDATE message SET updated_at=?,message=?,version=? WHERE day=? AND id=? IF version=?",
+            );
+            let params = (
+                new_updated_at,
+                message.to_cql(),
+                version + 1,
+                self.day,
+                self.id.to_cql(),
+                version,
+            );
+            self.version += 1;
+            self.updated_at = new_updated_at;
+            self._fields = vec!["updated_at".to_string(), "version".to_string()];
+            db.execute(query, params).await?
+        } else {
+            let query = format!(
+                "UPDATE message SET updated_at=?,{}=? WHERE day=? AND id=? IF version=?",
+                lang
+            );
+            let params = (
+                new_updated_at,
+                message.to_cql(),
+                self.day,
+                self.id.to_cql(),
+                version,
+            );
+            self.updated_at = new_updated_at;
+            self._fields = vec!["updated_at".to_string()];
+            db.execute(query, params).await?
+        };
+
         if !extract_applied(res) {
             return Err(
                 HTTPError::new(409, "Message update failed, please try again".to_string()).into(),
             );
         }
-
-        self.updated_at = new_updated_at;
         Ok(true)
     }
 
@@ -425,7 +443,7 @@ mod tests {
             cols.set_as("context", &"context 1".to_string());
             let res = doc.update(db, cols, 1).await.unwrap();
             assert!(res);
-            assert_eq!(doc.version, 2);
+            assert_eq!(doc.version, 1);
 
             let mut cols = ColumnsMap::new();
             cols.set_as("context", &"context 2".to_string());
@@ -434,26 +452,26 @@ mod tests {
             assert!(res);
         }
 
-        // update_i18n
+        // update_message
         {
             let mut doc = Message::with_pk(id);
             doc.get_one(db, vec!["i18n".to_string()]).await.unwrap();
             assert_eq!(doc.id, id);
             assert_eq!(doc.context.as_str(), "");
-            assert_eq!(doc.version, 3);
+            assert_eq!(doc.version, 1);
             assert_eq!(doc.language, Language::Eng);
             assert_eq!(doc.message, message);
             assert!(doc._fields.contains(&"zho".to_string()));
             assert!(doc._i18n_messages.is_empty());
 
             let res = doc
-                .update_i18n(db, "zho".to_string(), message.clone(), 1)
+                .update_message(db, "zho".to_string(), message.clone(), 2)
                 .await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // version not match
 
-            doc.update_i18n(db, "zho".to_string(), message.clone(), 3)
+            doc.update_message(db, "zho".to_string(), message.clone(), 1)
                 .await
                 .unwrap();
 
@@ -461,12 +479,21 @@ mod tests {
             doc2.get_one(db, vec!["i18n".to_string()]).await.unwrap();
             assert_eq!(doc2.id, id);
             assert_eq!(doc2.context.as_str(), "");
-            assert_eq!(doc2.version, 3);
+            assert_eq!(doc2.version, 1);
             assert_eq!(doc2.language, Language::Eng);
             assert_eq!(doc2.message, message);
             assert!(doc2._fields.contains(&"zho".to_string()));
             assert!(doc2._i18n_messages.len() == 1);
             assert_eq!(doc2._i18n_messages.get("zho").unwrap(), &message);
+
+            doc2.update_message(db, "eng".to_string(), message.clone(), 1)
+                .await
+                .unwrap();
+            assert_eq!(doc2.version, 2);
+            let res = doc2
+                .update_message(db, "eng".to_string(), message.clone(), 1)
+                .await;
+            assert!(res.is_err());
         }
 
         // delete

@@ -144,6 +144,7 @@ pub struct UpdateMessageInput {
     pub version: i16,
     #[validate(length(min = 0, max = 1024))]
     pub context: Option<String>,
+    pub language: Option<PackObject<Language>>,
     pub message: Option<PackObject<Vec<u8>>>,
 }
 
@@ -152,9 +153,6 @@ impl UpdateMessageInput {
         let mut cols = ColumnsMap::new();
         if let Some(context) = self.context {
             cols.set_as("context", &context);
-        }
-        if let Some(message) = self.message {
-            cols.set_as("message", &message.unwrap());
         }
 
         if cols.is_empty() {
@@ -177,53 +175,24 @@ pub async fn update(
     let id = *input.id.to_owned();
     let version = input.version;
     let mut doc = db::Message::with_pk(id);
-    let cols = input.into()?;
+
     ctx.set_kvs(vec![
         ("action", "update_message".into()),
         ("id", doc.id.to_string().into()),
+        ("version", version.to_string().into()),
     ])
     .await;
 
-    let ok = doc.update(&app.scylla, cols, version).await?;
+    let ok = if let Some(message) = input.message {
+        let language = input.language.unwrap_or_default().to_639_3().to_string();
+        ctx.set("language", language.clone().into()).await;
+        doc.update_message(&app.scylla, language, message.unwrap(), version)
+            .await?
+    } else {
+        let cols = input.into()?;
+        doc.update(&app.scylla, cols, version).await?
+    };
     ctx.set("updated", ok.into()).await;
-    doc._fields = vec!["updated_at".to_string(), "version".to_string()];
-    Ok(to.with(SuccessResponse::new(MessageOutput::from(doc, &to))))
-}
-
-#[derive(Debug, Deserialize, Validate)]
-pub struct UpdateI18nMessageInput {
-    pub id: PackObject<xid::Id>,
-    #[validate(range(min = 1, max = 32767))]
-    pub version: i16,
-    pub language: PackObject<Language>,
-    pub message: PackObject<Vec<u8>>,
-}
-
-pub async fn update_i18n(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<UpdateI18nMessageInput>,
-) -> Result<PackObject<SuccessResponse<MessageOutput>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let id = *input.id.to_owned();
-    let version = input.version;
-    let language = input.language.to_639_3().to_string();
-    let mut doc = db::Message::with_pk(id);
-    ctx.set_kvs(vec![
-        ("action", "update_i18n_message".into()),
-        ("id", doc.id.to_string().into()),
-        ("language", language.clone().into()),
-    ])
-    .await;
-
-    let ok = doc
-        .update_i18n(&app.scylla, language, input.message.unwrap(), version)
-        .await?;
-    ctx.set("updated", ok.into()).await;
-    doc._fields = vec!["updated_at".to_string()];
     Ok(to.with(SuccessResponse::new(MessageOutput::from(doc, &to))))
 }
 
