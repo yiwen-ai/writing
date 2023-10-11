@@ -13,10 +13,10 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use crate::api::{
-    get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
-    Pagination, QueryGidCid,
+    get_fields, segment_content, token_from_xid, token_to_xid, validate_cbor_content, AppState,
+    GIDPagination, Pagination, QueryCid, QueryGidCid, SubscriptionInputOutput,
 };
-use crate::db::{self, meili};
+use crate::{db, db::meili};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PublicationOutput {
@@ -24,7 +24,10 @@ pub struct PublicationOutput {
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
     pub version: i16,
-    pub rating: i8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<i8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +59,11 @@ pub struct PublicationOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_length: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub partial_content: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<SubscriptionInputOutput>,
 }
 
 impl PublicationOutput {
@@ -67,6 +74,7 @@ impl PublicationOutput {
             language: to.with(val.language),
             version: val.version,
             rating: val._rating,
+            price: val._price,
             ..Default::default()
         };
 
@@ -100,6 +108,16 @@ impl PublicationOutput {
         }
 
         rt
+    }
+
+    fn need_pay(&self, now_ms: i64) -> bool {
+        if self.price.unwrap_or(0) <= 0 {
+            return false;
+        }
+        match self.subscription {
+            Some(ref sub) => sub.expire_at < now_ms,
+            None => true,
+        }
     }
 }
 
@@ -216,8 +234,10 @@ pub async fn create(
         );
     }
 
-    doc._rating = index.rating;
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+    doc._rating = Some(index.rating);
+    doc._price = Some(index.price);
+    let output = PublicationOutput::from(doc, &to);
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -228,6 +248,7 @@ pub struct QueryPublicationInputput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub fields: Option<String>,
+    pub check_subscription: Option<bool>,
 }
 
 pub async fn get(
@@ -263,9 +284,20 @@ pub async fn get(
     let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
-    doc._rating = index.rating;
 
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+    doc._rating = Some(index.rating);
+    doc._price = Some(index.price);
+    let mut output = PublicationOutput::from(doc, &to);
+    if input.check_subscription.unwrap_or(false) {
+        output.subscription =
+            try_get_subscription(&app.scylla, &index, &to, ctx.user, ctx.unix_ms as i64).await;
+        if output.need_pay(ctx.unix_ms as i64) {
+            let (ok, content) = segment_content(output.content, 0.6);
+            output.content = content;
+            output.partial_content = Some(ok);
+        }
+    }
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -274,6 +306,7 @@ pub struct ImplicitQueryPublicationInputput {
     pub gid: Option<PackObject<xid::Id>>,
     pub language: Option<PackObject<isolang::Language>>,
     pub fields: Option<String>,
+    pub check_subscription: Option<bool>,
 }
 
 pub async fn implicit_get(
@@ -311,9 +344,21 @@ pub async fn implicit_get(
     let mut doc = db::Publication::get_implicit_published(&app.scylla, gid, cid, language).await?;
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
-    doc._rating = index.rating;
 
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+    doc._rating = Some(index.rating);
+    doc._price = Some(index.price);
+    let mut output = PublicationOutput::from(doc, &to);
+    if input.check_subscription.unwrap_or(false) {
+        output.subscription =
+            try_get_subscription(&app.scylla, &index, &to, ctx.user, ctx.unix_ms as i64).await;
+        if output.need_pay(ctx.unix_ms as i64) {
+            let (ok, content) = segment_content(output.content, 0.6);
+            output.content = content;
+            output.partial_content = Some(ok);
+        }
+    }
+
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 pub async fn implicit_get_beta(
@@ -353,9 +398,20 @@ pub async fn implicit_get_beta(
     let mut doc: db::Publication = idoc.into();
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
-    doc._rating = index.rating;
 
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+    doc._rating = Some(index.rating);
+    doc._price = Some(index.price);
+    let mut output = PublicationOutput::from(doc, &to);
+    if input.check_subscription.unwrap_or(false) {
+        output.subscription =
+            try_get_subscription(&app.scylla, &index, &to, ctx.user, ctx.unix_ms as i64).await;
+        if output.need_pay(ctx.unix_ms as i64) {
+            let (ok, content) = segment_content(output.content, 0.6);
+            output.content = content;
+            output.partial_content = Some(ok);
+        }
+    }
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 pub async fn list(
@@ -898,4 +954,163 @@ pub async fn delete(
         );
     }
     Ok(to.with(SuccessResponse::new(res)))
+}
+
+pub async fn get_subscription(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryCid>,
+) -> Result<PackObject<SuccessResponse<SubscriptionInputOutput>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let cid = *input.cid.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "get_creation_subscription".into()),
+        ("cid", cid.to_string().into()),
+    ])
+    .await;
+
+    let mut doc = db::CreationSubscription::with_pk(ctx.user, cid);
+    doc.get_one(&app.scylla, vec![]).await?;
+    Ok(to.with(SuccessResponse::new(SubscriptionInputOutput {
+        uid: to.with(doc.uid),
+        cid: to.with(doc.cid),
+        txn: to.with(doc.txn),
+        updated_at: doc.updated_at,
+        expire_at: doc.expire_at,
+    })))
+}
+
+pub async fn update_subscription(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<SubscriptionInputOutput>,
+) -> Result<PackObject<SuccessResponse<SubscriptionInputOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let uid = *input.uid.to_owned();
+    let cid = *input.cid.to_owned();
+    let txn = *input.txn.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "update_creation_subscription".into()),
+        ("uid", uid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("txn", txn.to_string().into()),
+    ])
+    .await;
+
+    let mut icreation = db::CreationIndex::with_pk(cid);
+    icreation.get_one(&app.scylla).await?;
+    if ctx.rating < icreation.rating {
+        return Err(HTTPError::new(451, "Collection unavailable".to_string()));
+    }
+    // ensure published
+    let _ = db::PublicationIndex::get_implicit_published(
+        &app.scylla,
+        cid,
+        icreation.gid,
+        Language::Und,
+    )
+    .await?;
+    let mut doc = db::CreationSubscription::with_pk(ctx.user, cid);
+    match doc.get_one(&app.scylla, vec![]).await {
+        Ok(_) => {
+            if doc.expire_at >= input.expire_at {
+                return Err(HTTPError::new(
+                    400,
+                    "Subscription expire_at can only be extended".to_string(),
+                ));
+            }
+            if doc.updated_at != input.updated_at {
+                return Err(HTTPError::new(
+                    409,
+                    format!(
+                        "Subscription updated_at conflict, expected updated_at {}, got {}",
+                        doc.updated_at, input.updated_at
+                    ),
+                ));
+            }
+            doc.update(&app.scylla, txn, input.expire_at, input.updated_at)
+                .await?;
+            ctx.set("updated", true.into()).await;
+        }
+        Err(_) => {
+            doc.txn = txn;
+            doc.expire_at = input.expire_at;
+            doc.save(&app.scylla).await?;
+            ctx.set("created", true.into()).await;
+        }
+    }
+
+    Ok(to.with(SuccessResponse::new(SubscriptionInputOutput {
+        uid: to.with(doc.uid),
+        cid: to.with(doc.cid),
+        txn: to.with(doc.txn),
+        updated_at: doc.updated_at,
+        expire_at: doc.expire_at,
+    })))
+}
+
+async fn try_get_subscription<T>(
+    scylla: &db::scylladb::ScyllaDB,
+    creation: &db::CreationIndex,
+    to: &PackObject<T>,
+    uid: xid::Id,
+    now_ms: i64,
+) -> Option<SubscriptionInputOutput> {
+    if creation.price <= 0 || uid <= db::MIN_ID {
+        return None;
+    }
+
+    let mut output = SubscriptionInputOutput::default();
+    let mut doc = db::CreationSubscription::with_pk(uid, creation.id);
+    if doc.get_one(scylla, vec![]).await.is_ok() {
+        output = SubscriptionInputOutput {
+            uid: to.with(doc.uid),
+            cid: to.with(doc.cid),
+            txn: to.with(doc.txn),
+            updated_at: doc.updated_at,
+            expire_at: doc.expire_at,
+        };
+        if output.expire_at >= now_ms {
+            return Some(output);
+        }
+    }
+    if let Ok(parents) = db::Collection::list_by_child(
+        scylla,
+        creation.id,
+        vec!["gid".to_string()],
+        Some(creation.gid),
+        None,
+    )
+    .await
+    {
+        for parent in parents {
+            let mut doc = db::CollectionSubscription::with_pk(uid, parent.id);
+            if doc.get_one(scylla, vec![]).await.is_ok() && doc.expire_at > output.expire_at {
+                output = SubscriptionInputOutput {
+                    uid: to.with(doc.uid),
+                    cid: to.with(doc.cid),
+                    txn: to.with(doc.txn),
+                    updated_at: doc.updated_at,
+                    expire_at: doc.expire_at,
+                };
+                if output.expire_at >= now_ms {
+                    return Some(output);
+                }
+            }
+        }
+    }
+
+    if output.expire_at > 0 {
+        return Some(output);
+    }
+
+    None
 }

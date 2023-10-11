@@ -277,9 +277,16 @@ impl PublicationIndex {
     ) -> anyhow::Result<PublicationIndex> {
         let fields = Self::fields();
 
+        if language != Language::Und {
+            let mut doc = Self::with_pk(cid, language);
+            if doc.get_one(db).await.is_ok() && (gid <= MIN_ID || gid == doc.gid) {
+                return Ok(doc);
+            }
+        }
+
         let rows = if gid <= MIN_ID {
             let query = format!(
-                "SELECT {} FROM pub_index WHERE day=? AND cid=? LIMIT 200 USING TIMEOUT 3s",
+                "SELECT {} FROM pub_index WHERE day=? AND cid=? AND original=true LIMIT 200 ALLOW FILTERING USING TIMEOUT 3s",
                 fields.clone().join(",")
             );
             let params = (xid_day(cid), cid.to_cql());
@@ -312,7 +319,7 @@ impl PublicationIndex {
         if res.is_empty() {
             return Err(HTTPError::new(
                 404,
-                format!("Publication not found, cid: {},gid: {}", cid, gid),
+                format!("Publication not found, cid: {}, gid: {}", cid, gid),
             )
             .into());
         }
@@ -367,8 +374,9 @@ pub struct Publication {
     pub license: String,
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
-    pub _rating: i8,          // 内容安全分级
-    pub _length: i32,         // 内容字节长度
+    pub _rating: Option<i8>,  // 内容安全分级
+    pub _price: Option<i64>,
+    pub _length: i32, // 内容字节长度
     pub _content: Vec<u8>,
 }
 

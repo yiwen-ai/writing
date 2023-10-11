@@ -17,7 +17,7 @@ pub struct Document {
     pub id: String, // base64_raw_url(cbor([cid,language,gid]))
     pub gid: String,
     pub language: String,
-    pub kind: i8, // 0: creation, 1: publication
+    pub kind: i8, // 0: creation, 1: publication, 2: collection
     pub version: i16,
 
     #[serde(default)]

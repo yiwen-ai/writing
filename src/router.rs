@@ -70,6 +70,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     "/update_status",
                     routing::patch(api::creation::update_status),
                 )
+                .route("/update_price", routing::patch(api::creation::update_price))
                 .route(
                     "/update_content",
                     routing::put(api::creation::update_content).patch(todo),
@@ -112,7 +113,12 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route(
                     "/update_content",
                     routing::put(api::publication::update_content).patch(todo),
-                ), // patch content
+                )
+                .route(
+                    "/subscription",
+                    routing::post(api::publication::update_subscription)
+                        .get(api::publication::get_subscription),
+                ),
         )
         .nest(
             "/beta/publication",
@@ -144,6 +150,41 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     .patch(api::message::update)
                     .delete(api::message::delete),
             ),
+        )
+        .nest(
+            "/v1/collection",
+            Router::new()
+                .route(
+                    "/",
+                    routing::post(api::collection::create)
+                        .get(api::collection::get)
+                        .patch(api::collection::update)
+                        .delete(api::collection::delete),
+                )
+                .route(
+                    "/info",
+                    routing::get(api::collection::get_info).patch(api::collection::update_info),
+                )
+                .route(
+                    "/update_status",
+                    routing::patch(api::collection::update_status),
+                )
+                .route(
+                    "/child",
+                    routing::post(api::collection::add_children)
+                        .patch(api::collection::update_child)
+                        .delete(api::collection::remove_child),
+                )
+                .route("/list", routing::post(api::collection::list))
+                .route(
+                    "/list_children",
+                    routing::post(api::collection::list_children),
+                )
+                .route(
+                    "/subscription",
+                    routing::post(api::collection::update_subscription)
+                        .get(api::collection::get_subscription),
+                ),
         )
         .nest(
             "/v1/bookmark",

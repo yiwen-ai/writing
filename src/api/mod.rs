@@ -9,6 +9,7 @@ use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 use crate::db;
 
 pub mod bookmark;
+pub mod collection;
 pub mod creation;
 pub mod message;
 pub mod publication;
@@ -16,9 +17,10 @@ pub mod search;
 
 mod content;
 pub use content::{
-    validate_cbor_content, AttrValue, DocumentNode, PartialNode, MAX_CONTENT_LEN,
+    segment_content, validate_cbor_content, AttrValue, DocumentNode, PartialNode,
     MAX_CREATION_CONTENT_LEN,
 };
+pub use db::{MAX_CONTENT_LEN, MAX_MESSAGE_LEN};
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -75,6 +77,7 @@ pub async fn healthz(to: PackObject<()>, State(app): State<Arc<AppState>>) -> Pa
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryId {
     pub id: PackObject<xid::Id>,
+    pub status: Option<i8>,
     pub fields: Option<String>,
 }
 
@@ -82,6 +85,12 @@ pub struct QueryId {
 pub struct QueryCid {
     pub cid: PackObject<xid::Id>,
     pub fields: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct QueryIdCid {
+    pub id: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -143,6 +152,15 @@ pub struct UpdateStatusInput {
     #[validate(range(min = -1, max = 2))]
     pub status: i8,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Validate)]
+pub struct SubscriptionInputOutput {
+    pub uid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub txn: PackObject<xid::Id>,
+    pub updated_at: i64,
+    pub expire_at: i64,
 }
 
 pub fn get_fields(fields: Option<String>) -> Vec<String> {

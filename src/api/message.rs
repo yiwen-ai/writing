@@ -5,7 +5,7 @@ use axum::{
 use isolang::Language;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, convert::From, sync::Arc};
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
 use axum_web::context::ReqContext;
 use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
@@ -19,9 +19,21 @@ use crate::db;
 pub struct CreateMessageInput {
     pub attach_to: PackObject<xid::Id>,
     pub kind: String,
+    #[validate(length(min = 0, max = 512))]
     pub context: String,
     pub language: PackObject<Language>,
+    #[validate(custom = "validate_message")]
     pub message: PackObject<Vec<u8>>,
+}
+
+pub fn validate_message(data: &PackObject<Vec<u8>>) -> Result<(), ValidationError> {
+    if data.len() > db::MAX_MESSAGE_LEN {
+        return Err(ValidationError::new("message length is too long"));
+    }
+
+    let _ = db::MessageValue::try_from(data.unwrap_ref().as_slice())
+        .map_err(|_| ValidationError::new("message is not a valid cbor"))?;
+    Ok(())
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -48,7 +60,7 @@ pub struct MessageOutput {
 }
 
 impl MessageOutput {
-    fn from<T>(val: db::Message, to: &PackObject<T>) -> Self {
+    pub fn from<T>(val: db::Message, to: &PackObject<T>) -> Self {
         let mut rt = Self {
             id: to.with(val.id),
             ..Default::default()
@@ -142,9 +154,10 @@ pub struct UpdateMessageInput {
     pub id: PackObject<xid::Id>,
     #[validate(range(min = 1, max = 32767))]
     pub version: i16,
-    #[validate(length(min = 0, max = 1024))]
+    #[validate(length(min = 0, max = 512))]
     pub context: Option<String>,
     pub language: Option<PackObject<Language>>,
+    #[validate(custom = "validate_message")]
     pub message: Option<PackObject<Vec<u8>>>,
 }
 
@@ -184,9 +197,9 @@ pub async fn update(
     .await;
 
     let ok = if let Some(message) = input.message {
-        let language = input.language.unwrap_or_default().to_639_3().to_string();
-        ctx.set("language", language.clone().into()).await;
-        doc.update_message(&app.scylla, language, message.unwrap(), version)
+        let language = *input.language.unwrap_or_default();
+        ctx.set("language", language.to_639_3().into()).await;
+        doc.update_message(&app.scylla, language, &message, version)
             .await?
     } else {
         let cols = input.into()?;

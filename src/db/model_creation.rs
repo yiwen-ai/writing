@@ -17,6 +17,7 @@ pub struct CreationIndex {
     pub id: xid::Id,
     pub gid: xid::Id,
     pub rating: i8,
+    pub price: i64,
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
 
@@ -31,12 +32,15 @@ impl CreationIndex {
     pub async fn get_one(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<()> {
         self._fields = Self::fields();
 
-        let query = "SELECT gid,rating FROM creation_index WHERE id=? LIMIT 1";
+        let query = format!(
+            "SELECT {} FROM creation_index WHERE id=? LIMIT 1",
+            self._fields.join(",")
+        );
         let params = (self.id.to_cql(),);
         let res = db.execute(query, params).await?.single_row()?;
 
-        let mut cols = ColumnsMap::with_capacity(2);
-        cols.fill(res, &vec!["gid".to_string(), "rating".to_string()])?;
+        let mut cols = ColumnsMap::with_capacity(self._fields.len());
+        cols.fill(res, &self._fields)?;
         self.fill(&cols);
 
         Ok(())
@@ -50,8 +54,23 @@ impl CreationIndex {
         }
 
         self._fields = Self::fields();
-        let query = "INSERT INTO creation_index (id,gid,rating) VALUES (?,?,?) IF NOT EXISTS";
-        let params = (self.id.to_cql(), self.gid.to_cql(), self.rating);
+        let mut cols_name: Vec<&str> = Vec::with_capacity(self._fields.len());
+        let mut vals_name: Vec<&str> = Vec::with_capacity(self._fields.len());
+        let mut params: Vec<&CqlValue> = Vec::with_capacity(self._fields.len());
+        let cols = self.to();
+
+        for field in &self._fields {
+            cols_name.push(field);
+            vals_name.push("?");
+            params.push(cols.get(field).unwrap());
+        }
+
+        let query = format!(
+            "INSERT INTO creation_index ({}) VALUES ({}) IF NOT EXISTS",
+            cols_name.join(","),
+            vals_name.join(",")
+        );
+
         let res = db.execute(query, params).await?;
         if !extract_applied(res) {
             return Err(HTTPError::new(409, "CreationIndex already exists".to_string()).into());
@@ -65,7 +84,7 @@ impl CreationIndex {
         ids: Vec<xid::Id>,
         max_rating: i8,
     ) -> anyhow::Result<Vec<CreationIndex>> {
-        let fields: Vec<String> = Self::fields();
+        let fields = Self::fields();
 
         let mut vals_name: Vec<&str> = Vec::with_capacity(ids.len());
         let mut params: Vec<CqlValue> = Vec::with_capacity(ids.len() + 1);
@@ -75,7 +94,11 @@ impl CreationIndex {
             params.push(id.to_cql());
         }
 
-        let query = format!("SELECT id,gid,rating FROM creation_index WHERE id IN ({}) AND rating<=? ALLOW FILTERING", vals_name.join(","));
+        let query = format!(
+            "SELECT {} FROM creation_index WHERE id IN ({}) AND rating<=? ALLOW FILTERING",
+            fields.join(","),
+            vals_name.join(",")
+        );
         params.push(max_rating.to_cql());
         let res = db.execute(query, params).await?;
 
@@ -90,6 +113,33 @@ impl CreationIndex {
         }
 
         Ok(res)
+    }
+
+    pub async fn update_field(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        field: &str,
+    ) -> anyhow::Result<bool> {
+        let query = format!("UPDATE creation_index SET {}=? WHERE id=? IF EXISTS", field);
+        let params = match field {
+            "rating" => (self.rating.to_cql(), self.id.to_cql()),
+            "price" => (self.price.to_cql(), self.id.to_cql()),
+            _ => return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into()),
+        };
+
+        let res = db.execute(query, params).await?;
+        if !extract_applied(res) {
+            return Err(HTTPError::new(
+                409,
+                format!(
+                    "CreationIndex update_field {} failed, please try again",
+                    field
+                ),
+            )
+            .into());
+        }
+
+        Ok(true)
     }
 }
 
