@@ -100,6 +100,18 @@ impl ToCqlVal for f32 {
     }
 }
 
+impl FromCqlVal for f64 {
+    fn from_cql(cql_val: &CqlValue) -> Result<Self, FromCqlValError> {
+        cql_to_rust::FromCqlVal::from_cql(cql_val.to_owned())
+    }
+}
+
+impl ToCqlVal for f64 {
+    fn to_cql(&self) -> CqlValue {
+        CqlValue::Double(self.to_owned())
+    }
+}
+
 impl FromCqlVal for xid::Id {
     fn from_cql(val: &CqlValue) -> Result<Self, FromCqlValError> {
         match val {

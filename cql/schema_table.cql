@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS creation_index (
-    id               BLOB,        -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
-    gid              BLOB,        -- group id, creation belong to
-    rating           TINYINT,     -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
+    id      BLOB,    -- creation id, 12 bytes XID, https://docs.rs/xid/latest/xid/
+    gid     BLOB,    -- group id, creation belong to
+    rating  TINYINT, -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
+    price   BIGINT,  -- -1: Free forever， 0: Free, > 0: Price in Yiwen Coin
     PRIMARY KEY (id)
 ) WITH caching = {'enabled': 'true'}
     AND comment = 'creations index'
@@ -110,15 +111,17 @@ CREATE INDEX pub_index_day_gid ON pub_index ((day), gid);
 CREATE INDEX pub_index_gid ON pub_index (gid);
 
 CREATE TABLE IF NOT EXISTS collection (
-    gid          BLOB,     -- group id, publication belong to
-    id           BLOB,     -- collection id, 12 bytes XID
-    status       TINYINT,  -- int8, -1: Archived, 0: Internal, 1: Subscription, 2: Public
-    maintainer   BLOB,     -- user id who maintainer the collection.
-    message      BLOB,     -- message id, xid, collection's title and summary
-    updated_at   BIGINT,   -- update at, unix time with second precision.
-    collections  SMALLINT, -- children collections count, max to 10000
-    publications SMALLINT, -- children collections count, max to 10000
-    PRIMARY KEY (gid, id)
+    day            INT,      -- collection birthday
+    id             BLOB,     -- collection id, 12 bytes XID
+    gid            BLOB,     -- group id, collection belong to
+    status         TINYINT,  -- int8, -1: Archived, 0: Private, 1: Internal, 2: Public
+    rating         TINYINT,  -- int8, 0: General Audience, 1: Parental Guidance, 2: Parents Strongly Cautioned, 3: Restricted; 4: Adults Only; 127: Banned.
+    mid            BLOB,     -- message id, xid, collection's title and summary
+    cover          TEXT,     -- cover url
+    updated_at     BIGINT,   -- update at, unix time with second precision.
+    price          BIGINT,   -- -1: Free forever， 0: Free, > 0: Price in Yiwen Coin
+    creation_price BIGINT,   -- -1: Free forever， 0: Free, > 0: Price in Yiwen Coin
+    PRIMARY KEY (day, id)
 ) WITH CLUSTERING ORDER BY (id DESC)
     AND caching = {'enabled': 'true'}
     AND comment = 'collections'
@@ -126,67 +129,54 @@ CREATE TABLE IF NOT EXISTS collection (
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE TABLE IF NOT EXISTS collection_collection (
-    id   BLOB,  -- collection id, 12 bytes XID
-    cid  BLOB,  -- child collection id
-    gid  BLOB,  -- group id, child collection belong to
-    ord  FLOAT, -- order value
+CREATE INDEX collection_day_gid ON collection ((day), gid);
+
+CREATE TABLE IF NOT EXISTS collection_children (
+    id   BLOB,    -- parent collection id, 12 bytes XID
+    cid  BLOB,    -- child collection or creation id
+    kind TINYINT, -- int8, 0: creation, 1: publication, 2: collection
+    ord  DOUBLE,  -- order value
     PRIMARY KEY (id, cid)
 ) WITH CLUSTERING ORDER BY (cid DESC)
     AND caching = {'enabled': 'true'}
-    AND comment = 'collection child collections'
+    AND comment = 'collection children'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX collection_collection_cid ON collection_collection (cid);
-
-CREATE TABLE IF NOT EXISTS collection_publication (
-    id   BLOB,     -- collection id, 12 bytes XID
-    cid  BLOB,     -- child publication id
-    gid  BLOB,     -- group id, child publication belong to
-    ord  FLOAT,    -- order value
-    PRIMARY KEY (id, cid)
-) WITH CLUSTERING ORDER BY (cid DESC)
-    AND caching = {'enabled': 'true'}
-    AND comment = 'collection child publications'
-    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
-    AND compression = {'sstable_compression': 'LZ4Compressor'}
-    AND default_time_to_live = 0;
-
-CREATE INDEX collection_publication_cid ON collection_publication (cid);
+CREATE INDEX collection_children_cid ON collection_children (cid);
 
 CREATE TABLE IF NOT EXISTS collection_subscription (
-    id         BLOB,   -- collection id, 12 bytes XID
     uid        BLOB,   -- user id who subscribe the collection
-    created_at BIGINT, -- create at, unix time, ms
-    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    cid        BLOB,   -- collection id, 12 bytes XID
     txn        BLOB,   -- latest subscription transaction id, 12 bytes XID
-    PRIMARY KEY (id, uid)
-) WITH CLUSTERING ORDER BY (uid DESC)
+    updated_at BIGINT, -- updated at, unix time, ms
+    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    PRIMARY KEY (uid, cid)
+) WITH CLUSTERING ORDER BY (cid DESC)
     AND caching = {'enabled': 'true'}
     AND comment = 'collection''s subscription'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX collection_subscription_uid ON collection_subscription (uid);
+CREATE INDEX collection_subscription_cid ON collection_subscription (cid);
 
-CREATE TABLE IF NOT EXISTS publication_subscription (
-    cid        BLOB,   -- publication id, 12 bytes XID
+CREATE TABLE IF NOT EXISTS creation_subscription (
     uid        BLOB,   -- user id who subscribe the publication
-    created_at BIGINT, -- create at, unix time, ms
-    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    cid        BLOB,   -- creation id, 12 bytes XID
     txn        BLOB,   -- latest subscription transaction id, 12 bytes XID
-    PRIMARY KEY (cid, uid)
-) WITH CLUSTERING ORDER BY (uid DESC)
+    updated_at BIGINT, -- updated at, unix time, ms
+    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    PRIMARY KEY (uid, cid)
+) WITH CLUSTERING ORDER BY (cid DESC)
     AND caching = {'enabled': 'true'}
-    AND comment = 'publication''s subscription'
+    AND comment = 'creation''s subscription'
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
 
-CREATE INDEX publication_subscription_uid ON publication_subscription (uid);
+CREATE INDEX creation_subscription_cid ON creation_subscription (cid);
 
 CREATE TABLE IF NOT EXISTS bookmark (
     uid         BLOB,        -- user id who create the bookmark, 12 bytes XID

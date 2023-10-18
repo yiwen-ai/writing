@@ -28,6 +28,8 @@ pub struct CreateCreationInput {
     pub genre: Option<Vec<String>>,
     #[validate(length(min = 1, max = 256))]
     pub title: String,
+    #[validate(length(min = 0, max = 2048))]
+    pub summary: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
     #[validate(length(min = 0, max = 5))]
@@ -151,6 +153,7 @@ pub async fn create(
         keywords: input.keywords.unwrap_or_default(),
         labels: input.labels.unwrap_or_default(),
         authors: input.authors.unwrap_or_default(),
+        summary: input.summary.unwrap_or_default(),
         license: input.license.unwrap_or_default(),
         ..Default::default()
     };
@@ -430,6 +433,57 @@ pub async fn update_status(
     ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdatePriceInput {
+    pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    #[validate(range(min = -1, max = 100000))]
+    pub price: i64,
+}
+
+pub async fn update_price(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<UpdatePriceInput>,
+) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = *input.gid.to_owned();
+    let id = *input.id.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "update_price".into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
+    ])
+    .await;
+    let mut doc = db::CreationIndex::with_pk(id);
+    doc.get_one(&app.scylla).await?;
+    if doc.gid != gid {
+        return Err(HTTPError::new(
+            403,
+            format!(
+                "Creation {} is not belong to group {}",
+                id,
+                gid
+            ),
+        ));
+    }
+
+    if doc.price < 0 {
+        return Err(HTTPError::new(
+            400,
+            format!("Creation {} is free forever", id),
+        ));
+    }
+
+    doc.price = input.price;
+    let _ = doc.update_field(&app.scylla, "price").await?;
+    Ok(to.with(SuccessResponse::new(true)))
 }
 
 pub async fn delete(

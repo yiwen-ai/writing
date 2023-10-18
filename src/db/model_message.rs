@@ -1,8 +1,15 @@
 use isolang::Language;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::TryFrom,
+};
 
-use axum_web::context::unix_ms;
-use axum_web::erring::HTTPError;
+use axum_web::{
+    context::unix_ms,
+    erring::HTTPError,
+    object::{cbor_from_slice, cbor_to_vec},
+};
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
@@ -24,6 +31,10 @@ pub static LANGUAGES: [&str; 158] = [
     "yor", "zul",
 ];
 
+pub fn support_language(lang: &str) -> bool {
+    LANGUAGES.contains(&lang)
+}
+
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
 pub struct Message {
     pub day: i32,
@@ -39,6 +50,60 @@ pub struct Message {
 
     pub _i18n_messages: HashMap<String, Vec<u8>>,
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MessageTexts {
+    pub id: String, // node id in the document
+    pub texts: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum MessageValue {
+    Map(BTreeMap<String, String>),
+    Array(Vec<MessageTexts>),
+}
+
+impl TryFrom<Vec<u8>> for MessageValue {
+    type Error = HTTPError;
+    fn try_from(data: Vec<u8>) -> Result<Self, Self::Error> {
+        MessageValue::try_from(data.as_slice())
+    }
+}
+
+impl TryFrom<&[u8]> for MessageValue {
+    type Error = HTTPError;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        if data.is_empty() {
+            return Err(HTTPError::new(400, "empty data".to_string()));
+        }
+        match data[0] & 0xe0 {
+            0x80 => match cbor_from_slice::<Vec<MessageTexts>>(data) {
+                Ok(res) => Ok(MessageValue::Array(res)),
+                Err(err) => Err(HTTPError::new(400, err.to_string())),
+            },
+            0xa0 => match cbor_from_slice::<BTreeMap<String, String>>(data) {
+                Ok(res) => Ok(MessageValue::Map(res)),
+                Err(err) => Err(HTTPError::new(400, err.to_string())),
+            },
+            v => Err(HTTPError::new(
+                400,
+                format!("invalid CBOR major type {}", v),
+            )),
+        }
+    }
+}
+
+impl TryFrom<MessageValue> for Vec<u8> {
+    type Error = HTTPError;
+
+    fn try_from(data: MessageValue) -> Result<Self, Self::Error> {
+        match data {
+            MessageValue::Map(v) => cbor_to_vec(&v),
+            MessageValue::Array(v) => cbor_to_vec(&v),
+        }
+    }
 }
 
 impl Message {
@@ -69,7 +134,7 @@ impl Message {
         }
 
         for field in &select_fields {
-            if !fields.contains(field) && !LANGUAGES.contains(&field.as_str()) {
+            if !fields.contains(field) && !support_language(field) {
                 return Err(HTTPError::new(400, format!("Invalid field: {}", field)).into());
             }
         }
@@ -79,6 +144,10 @@ impl Message {
             select_fields.push(field);
         }
         let field = "version".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
+        let field = "updated_at".to_string();
         if !select_fields.contains(&field) {
             select_fields.push(field);
         }
@@ -255,10 +324,11 @@ impl Message {
     pub async fn update_message(
         &mut self,
         db: &scylladb::ScyllaDB,
-        lang: String,
-        message: Vec<u8>,
+        lang: Language,
+        message: &Vec<u8>,
         version: i16,
     ) -> anyhow::Result<bool> {
+        let lang = lang.to_639_3().to_string();
         if !LANGUAGES.contains(&lang.as_str()) {
             return Err(HTTPError::new(400, format!("Invalid language: {}", lang)).into());
         }
@@ -286,9 +356,7 @@ impl Message {
                 .into());
             }
 
-            let query = format!(
-                "UPDATE message SET updated_at=?,message=?,version=? WHERE day=? AND id=? IF version=?",
-            );
+            let query = "UPDATE message SET updated_at=?,message=?,version=? WHERE day=? AND id=? IF version=?".to_string();
             let params = (
                 new_updated_at,
                 message.to_cql(),
@@ -360,6 +428,59 @@ mod tests {
             res.unwrap()
         })
         .await
+    }
+
+    #[test]
+    fn message_value_works() {
+        let data: Vec<u8> = cbor_to_vec(
+            &cbor!([{
+                "id" => "title",
+                "texts" => ["Hello ", "World"],
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        let value = MessageValue::try_from(data.as_slice()).unwrap();
+        assert_eq!(
+            value,
+            MessageValue::Array(vec![MessageTexts {
+                id: "title".to_string(),
+                texts: vec!["Hello ".to_string(), "World".to_string()],
+            }])
+        );
+        let data2: Vec<u8> = value.try_into().unwrap();
+        assert_eq!(data2, data);
+
+        let data: Vec<u8> = cbor_to_vec(
+            &cbor!({
+                "id" => "title",
+                "texts" => "Hello World",
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let value = MessageValue::try_from(data.as_slice()).unwrap();
+        assert_eq!(
+            value,
+            MessageValue::Map(BTreeMap::from_iter([
+                ("id".to_string(), "title".to_string()),
+                ("texts".to_string(), "Hello World".to_string()),
+            ]))
+        );
+        let data2: Vec<u8> = value.try_into().unwrap();
+        assert_eq!(data2, data);
+
+        let data: Vec<u8> = cbor_to_vec(
+            &cbor!({
+                "id" => "title",
+                "texts" => ["Hello ", "World"],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(MessageValue::try_from(data.as_slice()).is_err());
+        assert!(MessageValue::try_from(Vec::new()).is_err());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -464,14 +585,12 @@ mod tests {
             assert!(doc._fields.contains(&"zho".to_string()));
             assert!(doc._i18n_messages.is_empty());
 
-            let res = doc
-                .update_message(db, "zho".to_string(), message.clone(), 2)
-                .await;
+            let res = doc.update_message(db, Language::Zho, &message, 2).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // version not match
 
-            doc.update_message(db, "zho".to_string(), message.clone(), 1)
+            doc.update_message(db, Language::Zho, &message, 1)
                 .await
                 .unwrap();
 
@@ -486,13 +605,11 @@ mod tests {
             assert!(doc2._i18n_messages.len() == 1);
             assert_eq!(doc2._i18n_messages.get("zho").unwrap(), &message);
 
-            doc2.update_message(db, "eng".to_string(), message.clone(), 1)
+            doc2.update_message(db, Language::Eng, &message, 1)
                 .await
                 .unwrap();
             assert_eq!(doc2.version, 2);
-            let res = doc2
-                .update_message(db, "eng".to_string(), message.clone(), 1)
-                .await;
+            let res = doc2.update_message(db, Language::Eng, &message, 1).await;
             assert!(res.is_err());
         }
 

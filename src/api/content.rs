@@ -2,9 +2,9 @@ use serde::{de, Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt};
 use validator::ValidationError;
 
-use axum_web::object::{cbor_from_slice, PackObject};
+use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 
-pub const MAX_CONTENT_LEN: usize = 768 * 1024;
+use crate::db::MAX_CONTENT_LEN;
 pub const MAX_CREATION_CONTENT_LEN: usize = 512 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -48,6 +48,25 @@ pub fn validate_cbor_content(content: &PackObject<Vec<u8>>) -> Result<(), Valida
     let _: DocumentNode = cbor_from_slice(content.unwrap_ref())
         .map_err(|_| ValidationError::new("content is not a valid cbor"))?;
     Ok(())
+}
+
+pub fn segment_content(
+    content: Option<PackObject<Vec<u8>>>,
+    percentage: f32,
+) -> (bool, Option<PackObject<Vec<u8>>>) {
+    if let Some(ref data) = content {
+        let to = data.unit();
+        if let Ok(mut doc) = cbor_from_slice::<DocumentNode>(data) {
+            if let Some(ref mut content) = doc.content {
+                let len = (content.len() as f32 * percentage) as usize;
+                content.truncate(len);
+                if let Ok(data) = cbor_to_vec(&doc) {
+                    return (true, Some(to.with(data)));
+                }
+            }
+        }
+    }
+    (false, content)
 }
 
 impl Serialize for AttrValue {
