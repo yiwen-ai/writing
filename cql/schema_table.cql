@@ -181,7 +181,7 @@ CREATE INDEX creation_subscription_cid ON creation_subscription (cid);
 CREATE TABLE IF NOT EXISTS bookmark (
     uid         BLOB,        -- user id who create the bookmark, 12 bytes XID
     id          BLOB,        -- bookmark id, 12 bytes XID
-    kind        TINYINT,     -- int8, 0: Publication, 1: Collection
+    kind        TINYINT,     -- int8, 0/1: Creation/Publication, 2: Collection
     cid         BLOB,        -- publication id or collection id, 12 bytes XID
     gid         BLOB,        -- group id, publication belong to
     language    TEXT,        -- language

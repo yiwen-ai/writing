@@ -12,7 +12,7 @@ use axum_web::erring::{valid_user, HTTPError, SuccessResponse};
 use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
-use super::{get_fields, AppState, QueryId};
+use super::{get_fields, AppState, QueryGidId, QueryId};
 use crate::db;
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -154,6 +154,7 @@ pub struct UpdateMessageInput {
     pub id: PackObject<xid::Id>,
     #[validate(range(min = 1, max = 32767))]
     pub version: i16,
+    pub gid: PackObject<xid::Id>,
     #[validate(length(min = 0, max = 512))]
     pub context: Option<String>,
     pub language: Option<PackObject<Language>>,
@@ -162,7 +163,7 @@ pub struct UpdateMessageInput {
 }
 
 impl UpdateMessageInput {
-    fn into(self) -> anyhow::Result<ColumnsMap> {
+    pub fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
         if let Some(context) = self.context {
             cols.set_as("context", &context);
@@ -186,6 +187,7 @@ pub async fn update(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let version = input.version;
     let mut doc = db::Message::with_pk(id);
 
@@ -195,6 +197,15 @@ pub async fn update(
         ("version", version.to_string().into()),
     ])
     .await;
+
+    doc.get_one(&app.scylla, vec!["attach_to".to_string()])
+        .await?;
+    if doc.attach_to != gid {
+        return Err(HTTPError::new(
+            403,
+            "Message attach_to not match".to_string(),
+        ));
+    }
 
     let ok = if let Some(message) = input.message {
         let language = *input.language.unwrap_or_default();
@@ -213,20 +224,22 @@ pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryId>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
-        ("action", "delete_bookmark".into()),
+        ("action", "delete_message".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
     ])
     .await;
 
-    let mut doc = db::Bookmark::with_pk(ctx.user, id);
-    let res = doc.delete(&app.scylla).await?;
+    let mut doc = db::Message::with_pk(id);
+    let res = doc.delete(&app.scylla, gid).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }

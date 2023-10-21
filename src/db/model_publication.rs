@@ -643,7 +643,7 @@ impl Publication {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Publication updated_at conflict, expected updated_at {}, got {}",
+                    "Publication updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -718,7 +718,7 @@ impl Publication {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Publication updated_at conflict, expected updated_at {}, got {}",
+                    "Publication updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -781,7 +781,7 @@ impl Publication {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Publication updated_at conflict, expected updated_at {}, got {}",
+                    "Publication updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -841,7 +841,7 @@ impl Publication {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Publication delete conflict, expected status -1, got {}",
+                    "Publication status conflict, expected -1, got {}",
                     self.status
                 ),
             )

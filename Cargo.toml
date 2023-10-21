@@ -114,6 +114,3 @@ hex-literal = "0.4.1"
 
 [profile.release]
 lto = true
-
-[target.x86_64-unknown-linux-gnu]
-linker = "x86_64-unknown-linux-gnu-gcc"

@@ -19,6 +19,7 @@ pub struct Bookmark {
     pub updated_at: i64,
     pub title: String,
     pub labels: Vec<String>,
+    pub payload: Vec<u8>,
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
 }
@@ -134,7 +135,7 @@ impl Bookmark {
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
-        let valid_fields = ["version", "title", "gid", "language", "labels"];
+        let valid_fields = ["version", "title", "gid", "language", "labels", "payload"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {
@@ -147,7 +148,7 @@ impl Bookmark {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Bookmark updated_at conflict, expected updated_at {}, got {}",
+                    "Bookmark updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )

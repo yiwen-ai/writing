@@ -74,7 +74,12 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route(
                     "/update_content",
                     routing::put(api::creation::update_content).patch(todo),
-                ), // patch content
+                )
+                .route(
+                    "/subscription",
+                    routing::put(api::creation::update_subscription)
+                        .get(api::creation::get_subscription),
+                ),
         )
         .nest(
             "/v1/publication",
@@ -113,11 +118,6 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                 .route(
                     "/update_content",
                     routing::put(api::publication::update_content).patch(todo),
-                )
-                .route(
-                    "/subscription",
-                    routing::post(api::publication::update_subscription)
-                        .get(api::publication::get_subscription),
                 ),
         )
         .nest(
@@ -181,8 +181,12 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     routing::post(api::collection::list_children),
                 )
                 .route(
+                    "/list_by_child",
+                    routing::get(api::collection::list_by_child),
+                )
+                .route(
                     "/subscription",
-                    routing::post(api::collection::update_subscription)
+                    routing::put(api::collection::update_subscription)
                         .get(api::collection::get_subscription),
                 ),
         )

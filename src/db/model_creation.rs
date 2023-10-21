@@ -166,6 +166,9 @@ pub struct Creation {
     pub license: String,
 
     pub _fields: Vec<String>, // selected fields，`_` 前缀字段会被 CqlOrm 忽略
+    pub _rating: Option<i8>,  // 内容安全分级
+    pub _price: Option<i64>,
+    pub _length: i32, // 内容字节长度
     pub _content: Vec<u8>,
 }
 
@@ -391,7 +394,7 @@ impl Creation {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Creation updated_at conflict, expected updated_at {}, got {}",
+                    "Creation updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -474,7 +477,7 @@ impl Creation {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Creation updated_at conflict, expected updated_at {}, got {}",
+                    "Creation updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -550,7 +553,7 @@ impl Creation {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Creation updated_at conflict, expected updated_at {}, got {}",
+                    "Creation updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
@@ -607,10 +610,7 @@ impl Creation {
         if self.status != -1 {
             return Err(HTTPError::new(
                 409,
-                format!(
-                    "Creation delete conflict, expected status -1, got {}",
-                    self.status
-                ),
+                format!("Creation status conflict, expected -1, got {}", self.status),
             )
             .into());
         }

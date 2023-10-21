@@ -16,7 +16,8 @@ use scylla_orm::ColumnsMap;
 
 use super::{
     get_fields, token_from_xid, token_to_xid, validate_cbor_content, AppState, GIDPagination,
-    QueryGidId, UpdateStatusInput, MAX_CREATION_CONTENT_LEN,
+    QueryGidId, QueryId, SubscriptionInput, SubscriptionOutput, UpdateStatusInput,
+    MAX_CREATION_CONTENT_LEN,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -42,6 +43,7 @@ pub struct CreateCreationInput {
     pub content: PackObject<Vec<u8>>,
     #[validate(url)]
     pub license: Option<String>,
+    pub parent: Option<PackObject<xid::Id>>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -52,6 +54,8 @@ pub struct CreationOutput {
     pub status: Option<i8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rating: Option<i8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,6 +95,8 @@ impl CreationOutput {
         let mut rt = Self {
             gid: to.with(val.gid),
             id: to.with(val.id),
+            rating: val._rating,
+            price: val._price,
             ..Default::default()
         };
 
@@ -141,10 +147,55 @@ pub async fn create(
 
     valid_user(ctx.user)?;
 
+    let gid = *input.gid.to_owned();
+    let language = input.language.unwrap();
+    ctx.set_kvs(vec![
+        ("action", "create_creation".into()),
+        ("gid", gid.to_string().into()),
+        ("language", language.to_639_3().into()),
+    ])
+    .await;
+
+    let parent = if let Some(parent) = input.parent {
+        let mut doc = db::Collection::with_pk(*parent);
+        doc.get_one(
+            &app.scylla,
+            vec!["gid".to_string(), "status".to_string()],
+            None,
+        )
+        .await?;
+        if doc.gid != gid {
+            return Err(HTTPError::new(
+                403,
+                format!("Collection {} is not belong to group {}", doc.id, gid),
+            ));
+        }
+        if doc.status < 0 {
+            return Err(HTTPError::new(
+                400,
+                format!("Collection {} is archived", doc.id),
+            ));
+        }
+
+        let count = db::CollectionChildren::count_children(&app.scylla, doc.id).await?;
+        if count >= db::MAX_COLLECTION_CHILDREN {
+            return Err(HTTPError::new(
+                400,
+                format!(
+                    "Parent collection can only have {} children",
+                    db::MAX_COLLECTION_CHILDREN
+                ),
+            ));
+        }
+        Some(doc)
+    } else {
+        None
+    };
+
     let mut doc = db::Creation {
-        gid: input.gid.unwrap(),
+        gid,
         id: xid::new(),
-        language: input.language.unwrap(),
+        language,
         creator: ctx.user,
         original_url: input.original_url.unwrap_or_default(),
         genre: input.genre.unwrap_or_default(),
@@ -157,12 +208,6 @@ pub async fn create(
         license: input.license.unwrap_or_default(),
         ..Default::default()
     };
-    ctx.set_kvs(vec![
-        ("action", "create_creation".into()),
-        ("gid", doc.gid.to_string().into()),
-        ("id", doc.id.to_string().into()),
-    ])
-    .await;
 
     let ok = doc.save_with(&app.scylla, input.content.unwrap()).await?;
     ctx.set("created", ok.into()).await;
@@ -184,6 +229,18 @@ pub async fn create(
             "{}", err.to_string(),
         );
     }
+
+    if let Some(parent) = parent {
+        let mut child = db::CollectionChildren {
+            id: parent.id,
+            cid: doc.id,
+            kind: 0,
+            ord: ctx.unix_ms as f64,
+            ..Default::default()
+        };
+        let _ = child.save(&app.scylla).await;
+    }
+
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -206,9 +263,13 @@ pub async fn get(
     ])
     .await;
 
+    let mut idoc = db::CreationIndex::with_pk(id);
+    idoc.get_one(&app.scylla).await?;
     let mut doc = db::Creation::with_pk(gid, id);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
+    doc._rating = Some(idoc.rating);
+    doc._price = Some(idoc.price);
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -466,11 +527,7 @@ pub async fn update_price(
     if doc.gid != gid {
         return Err(HTTPError::new(
             403,
-            format!(
-                "Creation {} is not belong to group {}",
-                id,
-                gid
-            ),
+            format!("Creation {} is not belong to group {}", id, gid),
         ));
     }
 
@@ -526,6 +583,111 @@ pub async fn delete(
         );
     }
     Ok(to.with(SuccessResponse::new(res)))
+}
+
+pub async fn get_subscription(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryId>,
+) -> Result<PackObject<SuccessResponse<SubscriptionOutput>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let cid = *input.id.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "get_creation_subscription".into()),
+        ("cid", cid.to_string().into()),
+    ])
+    .await;
+
+    let mut icreation = db::CreationIndex::with_pk(cid);
+    icreation.get_one(&app.scylla).await?;
+    let mut doc = db::CreationSubscription::with_pk(ctx.user, cid);
+    doc.get_one(&app.scylla, vec![]).await?;
+    Ok(to.with(SuccessResponse::new(SubscriptionOutput {
+        uid: to.with(doc.uid),
+        cid: to.with(doc.cid),
+        gid: to.with(icreation.gid),
+        txn: to.with(doc.txn),
+        updated_at: doc.updated_at,
+        expire_at: doc.expire_at,
+    })))
+}
+
+pub async fn update_subscription(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<SubscriptionInput>,
+) -> Result<PackObject<SuccessResponse<SubscriptionOutput>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let uid = *input.uid.to_owned();
+    let cid = *input.cid.to_owned();
+    let txn = *input.txn.to_owned();
+
+    ctx.set_kvs(vec![
+        ("action", "update_creation_subscription".into()),
+        ("uid", uid.to_string().into()),
+        ("cid", cid.to_string().into()),
+        ("txn", txn.to_string().into()),
+    ])
+    .await;
+
+    let mut icreation = db::CreationIndex::with_pk(cid);
+    icreation.get_one(&app.scylla).await?;
+    if ctx.rating < icreation.rating {
+        return Err(HTTPError::new(451, "Collection unavailable".to_string()));
+    }
+    // ensure published
+    let _ = db::PublicationIndex::get_implicit_published(
+        &app.scylla,
+        cid,
+        icreation.gid,
+        Language::Und,
+    )
+    .await?;
+    let mut doc = db::CreationSubscription::with_pk(ctx.user, cid);
+    match doc.get_one(&app.scylla, vec![]).await {
+        Ok(_) => {
+            if doc.expire_at >= input.expire_at {
+                return Err(HTTPError::new(
+                    400,
+                    "Subscription expire_at can only be extended".to_string(),
+                ));
+            }
+            if doc.updated_at != input.updated_at {
+                return Err(HTTPError::new(
+                    409,
+                    format!(
+                        "Subscription updated_at conflict, expected updated_at {}, got {}",
+                        doc.updated_at, input.updated_at
+                    ),
+                ));
+            }
+            doc.update(&app.scylla, txn, input.expire_at, input.updated_at)
+                .await?;
+            ctx.set("updated", true.into()).await;
+        }
+        Err(_) => {
+            doc.txn = txn;
+            doc.expire_at = input.expire_at;
+            doc.save(&app.scylla).await?;
+            ctx.set("created", true.into()).await;
+        }
+    }
+
+    Ok(to.with(SuccessResponse::new(SubscriptionOutput {
+        uid: to.with(doc.uid),
+        cid: to.with(doc.cid),
+        gid: to.with(icreation.gid),
+        txn: to.with(doc.txn),
+        updated_at: doc.updated_at,
+        expire_at: doc.expire_at,
+    })))
 }
 
 #[cfg(test)]

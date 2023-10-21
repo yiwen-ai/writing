@@ -283,7 +283,7 @@ impl Message {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Message version conflict, expected version {}, got {}",
+                    "Message version conflict, expected {}, got {}",
                     self.version, version
                 ),
             )
@@ -339,7 +339,7 @@ impl Message {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Message version conflict, expected version {}, got {}",
+                    "Message version conflict, expected {}, got {}",
                     self.version, version
                 ),
             )
@@ -394,10 +394,17 @@ impl Message {
         Ok(true)
     }
 
-    pub async fn delete(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
-        let res = self.get_one(db, vec!["version".to_string()]).await;
+    pub async fn delete(
+        &mut self,
+        db: &scylladb::ScyllaDB,
+        attach_to: xid::Id,
+    ) -> anyhow::Result<bool> {
+        let res = self.get_one(db, vec!["attach_to".to_string()]).await;
         if res.is_err() {
             return Ok(false); // already deleted
+        }
+        if self.attach_to != attach_to {
+            return Err(HTTPError::new(403, "Message attach_to not match".to_string()).into());
         }
 
         let query = "DELETE FROM message WHERE day=? AND id=?";
@@ -616,10 +623,10 @@ mod tests {
         // delete
         {
             let mut doc = Message::with_pk(id);
-            let res = doc.delete(db).await.unwrap();
+            let res = doc.delete(db, gid).await.unwrap();
             assert!(res);
 
-            let res = doc.delete(db).await.unwrap();
+            let res = doc.delete(db, gid).await.unwrap();
             assert!(!res); // already deleted
         }
     }

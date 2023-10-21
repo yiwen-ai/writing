@@ -4,8 +4,8 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
-use structured_logger::unix_ms;
+use std::{collections::HashMap, convert::From, sync::Arc};
+
 use validator::{Validate, ValidationError};
 
 use crate::{db, db::meili};
@@ -16,8 +16,9 @@ use axum_web::object::PackObject;
 use scylla_orm::ColumnsMap;
 
 use super::{
-    get_fields, message, token_from_xid, token_to_xid, AppState, GIDPagination, QueryCid, QueryId,
-    QueryIdCid, SubscriptionInputOutput, UpdateStatusInput,
+    get_fields, message, token_from_xid, token_to_xid, AppState, GIDPagination, IDGIDPagination,
+    QueryGidCid, QueryGidId, QueryGidIdCid, QueryId, SubscriptionInput, SubscriptionOutput,
+    UpdateStatusInput, RFP,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -33,13 +34,14 @@ pub struct CreateCollectionInput {
     pub price: Option<i64>,
     #[validate(range(min = -1, max = 100000))]
     pub creation_price: Option<i64>,
+    pub parent: Option<PackObject<xid::Id>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CollectionInfoInput {
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
-    #[validate(length(min = 4, max = 2048))]
+    #[validate(length(min = 1, max = 2048))]
     pub summary: Option<String>,
     #[validate(length(min = 0, max = 10))]
     pub keywords: Option<Vec<String>>,
@@ -69,6 +71,10 @@ pub struct CollectionOutput {
     pub info: Option<db::CollectionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub i18n_info: Option<HashMap<String, db::CollectionInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<SubscriptionOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rfp: Option<RFP>,
 }
 
 impl CollectionOutput {
@@ -150,12 +156,48 @@ pub async fn create(
     };
     let info_msg: Vec<u8> = info.to_message()?;
 
+    let parent = if let Some(parent) = input.parent {
+        let mut doc = db::Collection::with_pk(*parent);
+        doc.get_one(
+            &app.scylla,
+            vec!["gid".to_string(), "status".to_string()],
+            None,
+        )
+        .await?;
+        if doc.gid != gid {
+            return Err(HTTPError::new(
+                403,
+                format!("Collection {} is not belong to group {}", doc.id, gid),
+            ));
+        }
+        if doc.status < 0 {
+            return Err(HTTPError::new(
+                400,
+                format!("Collection {} is archived", doc.id),
+            ));
+        }
+
+        let count = db::CollectionChildren::count_children(&app.scylla, doc.id).await?;
+        if count >= db::MAX_COLLECTION_CHILDREN {
+            return Err(HTTPError::new(
+                400,
+                format!(
+                    "Parent collection can only have {} children",
+                    db::MAX_COLLECTION_CHILDREN
+                ),
+            ));
+        }
+        Some(doc)
+    } else {
+        None
+    };
+
     let mut doc = db::Collection {
         id: xid::new(),
         gid,
         cover: input.cover.unwrap_or_default(),
-        price: price,
-        creation_price: creation_price,
+        price,
+        creation_price,
         ..Default::default()
     };
 
@@ -194,6 +236,17 @@ pub async fn create(
         );
     }
 
+    if let Some(parent) = parent {
+        let mut child = db::CollectionChildren {
+            id: parent.id,
+            cid: doc.id,
+            kind: 2,
+            ord: ctx.unix_ms as f64,
+            ..Default::default()
+        };
+        let _ = child.save(&app.scylla).await;
+    }
+
     doc._info = Some(msg);
     Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
 }
@@ -202,23 +255,65 @@ pub async fn get(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryId>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<CollectionOutput>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
+    let status = input.status.unwrap_or(2);
 
     ctx.set_kvs(vec![
         ("action", "get_collection".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
     ])
     .await;
 
     let mut doc = db::Collection::with_pk(id);
-    doc.get_one(&app.scylla, get_fields(input.fields.clone()), ctx.language)
-        .await?;
-    Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
+    let fields = get_fields(input.fields.clone());
+    doc.get_one(&app.scylla, fields, ctx.language).await?;
+    if status == 2 && doc.rating > ctx.rating {
+        return Err(HTTPError::new(451, "Collection unavailable".to_string()));
+    }
+    if status < 2 && doc.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
+    let price = doc.price;
+    let mut output = CollectionOutput::from(doc, &to);
+    if price > 0 {
+        if ctx.user > db::MIN_ID && *output.gid != gid {
+            let mut subscription = db::CollectionSubscription::with_pk(ctx.user, id);
+            if subscription.get_one(&app.scylla, vec![]).await.is_ok() {
+                output.subscription = Some(SubscriptionOutput {
+                    uid: to.with(subscription.uid),
+                    cid: to.with(subscription.cid),
+                    gid: to.with(*output.gid),
+                    txn: to.with(subscription.txn),
+                    updated_at: subscription.updated_at,
+                    expire_at: subscription.expire_at,
+                });
+            }
+        }
+        match output.subscription {
+            None => {
+                output.rfp = Some(RFP {
+                    creation: None,
+                    collection: Some(price),
+                })
+            }
+            Some(ref sub) => {
+                if sub.expire_at < ctx.unix_ms as i64 {
+                    output.rfp = Some(RFP {
+                        creation: None,
+                        collection: Some(price),
+                    })
+                }
+            }
+        }
+    }
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 pub async fn list(
@@ -265,6 +360,7 @@ pub async fn list(
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpdateCollectionInput {
     pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
     #[validate(url)]
     pub cover: Option<String>,
@@ -308,6 +404,7 @@ pub async fn update(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let mut doc = db::Collection::with_pk(id);
     let updated_at = input.updated_at;
     let cols = input.into()?;
@@ -317,7 +414,7 @@ pub async fn update(
     ])
     .await;
 
-    let ok = doc.update(&app.scylla, cols, updated_at).await?;
+    let ok = doc.update(&app.scylla, gid, cols, updated_at).await?;
     ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
@@ -337,22 +434,32 @@ pub async fn get_info(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryId>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<message::MessageOutput>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_collection_info".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
     ])
     .await;
 
     let mut doc = db::Collection::with_pk(id);
-    doc.get_one(&app.scylla, vec!["mid".to_string()], None)
-        .await?;
+    doc.get_one(
+        &app.scylla,
+        vec!["mid".to_string(), "gid".to_string()],
+        None,
+    )
+    .await?;
+
+    if doc.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
     let mut info = db::Message::with_pk(doc.mid);
     info.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
@@ -361,43 +468,17 @@ pub async fn get_info(
     ))))
 }
 
-#[derive(Debug, Deserialize, Validate)]
-pub struct UpdateCollectionInfoInput {
-    pub id: PackObject<xid::Id>,
-    #[validate(range(min = 1, max = 32767))]
-    pub version: i16,
-    #[validate(length(min = 0, max = 512))]
-    pub context: Option<String>,
-    pub language: Option<PackObject<Language>>,
-    #[validate(custom = "validate_collection_info")]
-    pub message: Option<PackObject<Vec<u8>>>,
-}
-
-impl UpdateCollectionInfoInput {
-    fn into(self) -> anyhow::Result<ColumnsMap, HTTPError> {
-        let mut cols = ColumnsMap::new();
-        if let Some(context) = self.context {
-            cols.set_as("context", &context);
-        }
-
-        if cols.is_empty() {
-            return Err(HTTPError::new(400, "No fields to update".to_string()));
-        }
-
-        Ok(cols)
-    }
-}
-
 pub async fn update_info(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<UpdateCollectionInfoInput>,
+    to: PackObject<message::UpdateMessageInput>,
 ) -> Result<PackObject<SuccessResponse<message::MessageOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let version = input.version;
 
     ctx.set_kvs(vec![
@@ -414,8 +495,13 @@ pub async fn update_info(
         None,
     )
     .await?;
+    if doc.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
+
     let mut info = db::Message::with_pk(doc.mid);
     if let Some(message) = input.message {
+        validate_collection_info(&message)?;
         let language = *input.language.unwrap_or_default();
         ctx.set("language", language.to_639_3().into()).await;
 
@@ -463,16 +549,18 @@ pub async fn update_status(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.unwrap_or_default();
 
     let mut doc = db::Collection::with_pk(id);
     ctx.set_kvs(vec![
         ("action", "update_collection_status".into()),
         ("id", doc.id.to_string().into()),
+        ("gid", gid.to_string().into()),
     ])
     .await;
 
     let ok = doc
-        .update_status(&app.scylla, input.status, input.updated_at)
+        .update_status(&app.scylla, gid, input.status, input.updated_at)
         .await?;
 
     ctx.set("updated", ok.into()).await;
@@ -484,27 +572,30 @@ pub async fn delete(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryId>,
+    input: Query<QueryGidId>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "delete_collection".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
     ])
     .await;
 
     let mut doc = db::Collection::with_pk(id);
-    let res = doc.delete(&app.scylla).await?;
+    let res = doc.delete(&app.scylla, gid).await?;
     Ok(to.with(SuccessResponse::new(res)))
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct AddChildrenInput {
     pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     #[validate(length(min = 1, max = 1000))]
     pub cids: Vec<PackObject<xid::Id>>,
     #[validate(range(min = 0, max = 1))]
@@ -521,6 +612,7 @@ pub async fn add_children(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let cids: Vec<xid::Id> = input.cids.iter().map(|id| *id.to_owned()).collect();
     ctx.set_kvs(vec![
         ("action", "add_collection_children".into()),
@@ -555,6 +647,9 @@ pub async fn add_children(
             "Parent collection is archived".to_string(),
         ));
     }
+    if parent.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
 
     let count = db::CollectionChildren::count_children(&app.scylla, id).await?;
     if count + cids.len() > db::MAX_COLLECTION_CHILDREN {
@@ -567,7 +662,7 @@ pub async fn add_children(
         ));
     }
 
-    let ord = unix_ms() as f64;
+    let ord = ctx.unix_ms as f64;
     let total = cids.len() as f64;
     let mut processed: Vec<xid::Id> = Vec::with_capacity(cids.len());
 
@@ -668,6 +763,7 @@ pub async fn add_children(
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct UpdateChildrenInput {
     pub id: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     #[validate(range(min = 0))]
     pub ord: f64,
@@ -683,13 +779,34 @@ pub async fn update_child(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
     ctx.set_kvs(vec![
         ("action", "update_collection_children".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
         ("cid", cid.to_string().into()),
     ])
     .await;
+
+    let mut parent = db::Collection::with_pk(id);
+    parent
+        .get_one(
+            &app.scylla,
+            vec!["gid".to_string(), "status".to_string()],
+            None,
+        )
+        .await?;
+    if parent.status < 0 {
+        return Err(HTTPError::new(
+            400,
+            "Parent collection is archived".to_string(),
+        ));
+    }
+    if parent.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
+
     let mut doc = db::CollectionChildren::with_pk(id, cid);
     let ok = doc.update_ord(&app.scylla, input.ord).await?;
     Ok(to.with(SuccessResponse::new(ok)))
@@ -699,20 +816,40 @@ pub async fn remove_child(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryIdCid>,
+    input: Query<QueryGidIdCid>,
 ) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
+    let gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "remove_collection_child".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
         ("cid", cid.to_string().into()),
     ])
     .await;
+
+    let mut parent = db::Collection::with_pk(id);
+    parent
+        .get_one(
+            &app.scylla,
+            vec!["gid".to_string(), "status".to_string()],
+            None,
+        )
+        .await?;
+    if parent.status < 0 {
+        return Err(HTTPError::new(
+            400,
+            "Parent collection is archived".to_string(),
+        ));
+    }
+    if parent.gid != gid {
+        return Err(HTTPError::new(403, "Collection gid not match".to_string()));
+    }
 
     let mut doc = db::CollectionChildren::with_pk(id, cid);
     let ok = doc.delete(&app.scylla).await?;
@@ -722,6 +859,7 @@ pub async fn remove_child(
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CollectionChildrenOutput {
     pub parent: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub kind: i8,
     pub ord: f64,
@@ -738,24 +876,44 @@ pub struct CollectionChildrenOutput {
 pub async fn list_children(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<QueryId>,
+    to: PackObject<IDGIDPagination>,
 ) -> Result<PackObject<SuccessResponse<Vec<CollectionChildrenOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
     input.validate()?;
-    valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
-    let status = input.status.unwrap_or(2);
+    let gid = *input.gid.to_owned();
+    let status = input.status.unwrap_or(0);
+    let token = token_to_xid(&input.page_token);
+    let page_size = input.page_size.unwrap_or(10) as usize;
 
     ctx.set_kvs(vec![
         ("action", "list_collection_child".into()),
         ("id", id.to_string().into()),
+        ("gid", gid.to_string().into()),
         ("status", status.into()),
     ])
     .await;
 
     let language = ctx.language.unwrap_or_default();
-    let children = db::CollectionChildren::list_children(&app.scylla, id).await?;
+    let mut children = db::CollectionChildren::list_children(&app.scylla, id).await?;
+    let total = children.len();
+    if let Some(cid) = token {
+        if let Some(i) = children.iter().position(|v| v.cid == cid) {
+            children = children.split_off(i + 1);
+        } else {
+            children.truncate(0);
+        }
+    }
+
+    let has_next = children.len() > page_size;
+    children.truncate(page_size);
+    let next_page_token = to.with_option(if has_next {
+        token_from_xid(Some(children.last().unwrap().cid))
+    } else {
+        None
+    });
+
     let mut res: Vec<CollectionChildrenOutput> = Vec::with_capacity(children.len());
 
     for child in children {
@@ -784,6 +942,7 @@ pub async fn list_children(
                     )
                     .await
                     .is_ok()
+                    && doc.status >= status
                 {
                     if let Some((lang, info)) = doc.to_info(language) {
                         output.status = doc.status;
@@ -792,6 +951,7 @@ pub async fn list_children(
                         output.title = info.title;
                         output.summary = info.summary;
                     }
+                    output.gid = to.with(doc.gid);
                     output.rating = doc.rating;
                     output.cover = doc.cover;
                     output.price = doc.price;
@@ -829,6 +989,7 @@ pub async fn list_children(
                                 ],
                             )
                             .await?;
+                            output.gid = to.with(doc.gid);
                             output.status = 2;
                             output.updated_at = doc.updated_at;
                             output.language = to.with(doc.language);
@@ -838,7 +999,7 @@ pub async fn list_children(
                         }
                         _ => {
                             // get for owner
-                            if child.kind == 0 && status <= 0 {
+                            if child.kind == 0 && icreation.gid == gid {
                                 let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
                                 doc.get_one(
                                     &app.scylla,
@@ -850,12 +1011,15 @@ pub async fn list_children(
                                     ],
                                 )
                                 .await?;
-                                output.status = doc.status;
-                                output.updated_at = doc.updated_at;
-                                output.language = to.with(doc.language);
-                                output.title = doc.title;
-                                output.summary = doc.summary;
-                                output.kind = 0;
+                                if doc.status >= status {
+                                    output.gid = to.with(doc.gid);
+                                    output.status = doc.status;
+                                    output.updated_at = doc.updated_at;
+                                    output.language = to.with(doc.language);
+                                    output.title = doc.title;
+                                    output.summary = doc.summary;
+                                    output.kind = 0;
+                                }
                             };
                         }
                     }
@@ -864,9 +1028,93 @@ pub async fn list_children(
             _ => {}
         }
 
-        if output.status >= status && output.rating <= ctx.rating {
+        if (output.status == 2 && output.rating <= ctx.rating)
+            || (output.status >= status && *output.gid == gid)
+        {
             res.push(output)
         }
+    }
+
+    Ok(to.with(SuccessResponse {
+        total_size: Some(total as u64),
+        next_page_token,
+        result: res,
+    }))
+}
+
+pub async fn list_by_child(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<()>,
+    input: Query<QueryGidCid>,
+) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    let gid = *input.gid.to_owned();
+    let cid = *input.cid.to_owned();
+    let status = input.status.unwrap_or(0);
+    let fields = get_fields(input.fields.to_owned());
+
+    ctx.set_kvs(vec![
+        ("action", "list_collection_by_child".into()),
+        ("gid", gid.to_string().into()),
+        ("cid", cid.to_string().into()),
+    ])
+    .await;
+
+    let children = db::CollectionChildren::list_by_child(&app.scylla, cid).await?;
+    let mut res: Vec<CollectionOutput> = Vec::with_capacity(children.len());
+
+    for child in children {
+        let mut doc = db::Collection::with_pk(child.id);
+        if doc
+            .get_one(&app.scylla, fields.clone(), ctx.language)
+            .await
+            .is_ok()
+            && ((doc.status == 2 && doc.rating <= ctx.rating)
+                || (doc.status >= status && doc.gid == gid))
+        {
+            let price = doc.price;
+            let subscription = if price > 0 && ctx.user > db::MIN_ID && doc.gid != gid {
+                let mut subscription = db::CollectionSubscription::with_pk(ctx.user, doc.id);
+                if subscription.get_one(&app.scylla, vec![]).await.is_ok() {
+                    Some(subscription)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let mut output = CollectionOutput::from(doc, &to);
+            match subscription {
+                Some(s) => {
+                    if s.expire_at < ctx.unix_ms as i64 {
+                        output.rfp = Some(RFP {
+                            creation: None,
+                            collection: Some(price),
+                        })
+                    }
+                    output.subscription = Some(SubscriptionOutput {
+                        uid: to.with(s.uid),
+                        cid: to.with(s.cid),
+                        gid: to.with(*output.gid),
+                        txn: to.with(s.txn),
+                        updated_at: s.updated_at,
+                        expire_at: s.expire_at,
+                    });
+                }
+                None => {
+                    output.rfp = Some(RFP {
+                        creation: None,
+                        collection: Some(price),
+                    })
+                }
+            }
+
+            res.push(output)
+        };
     }
 
     Ok(to.with(SuccessResponse::new(res)))
@@ -876,12 +1124,12 @@ pub async fn get_subscription(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
-    input: Query<QueryCid>,
-) -> Result<PackObject<SuccessResponse<SubscriptionInputOutput>>, HTTPError> {
+    input: Query<QueryId>,
+) -> Result<PackObject<SuccessResponse<SubscriptionOutput>>, HTTPError> {
     input.validate()?;
     valid_user(ctx.user)?;
 
-    let cid = *input.cid.to_owned();
+    let cid = *input.id.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_collection_subscription".into()),
@@ -889,11 +1137,17 @@ pub async fn get_subscription(
     ])
     .await;
 
+    let mut collection = db::Collection::with_pk(cid);
+    collection
+        .get_one(&app.scylla, vec!["status".to_string()], None)
+        .await?;
+
     let mut doc = db::CollectionSubscription::with_pk(ctx.user, cid);
     doc.get_one(&app.scylla, vec![]).await?;
-    Ok(to.with(SuccessResponse::new(SubscriptionInputOutput {
+    Ok(to.with(SuccessResponse::new(SubscriptionOutput {
         uid: to.with(doc.uid),
         cid: to.with(doc.cid),
+        gid: to.with(collection.gid),
         txn: to.with(doc.txn),
         updated_at: doc.updated_at,
         expire_at: doc.expire_at,
@@ -903,8 +1157,8 @@ pub async fn get_subscription(
 pub async fn update_subscription(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<SubscriptionInputOutput>,
-) -> Result<PackObject<SuccessResponse<SubscriptionInputOutput>>, HTTPError> {
+    to: PackObject<SubscriptionInput>,
+) -> Result<PackObject<SuccessResponse<SubscriptionOutput>>, HTTPError> {
     let (to, input) = to.unpack();
     input.validate()?;
     valid_user(ctx.user)?;
@@ -968,9 +1222,10 @@ pub async fn update_subscription(
         }
     }
 
-    Ok(to.with(SuccessResponse::new(SubscriptionInputOutput {
+    Ok(to.with(SuccessResponse::new(SubscriptionOutput {
         uid: to.with(doc.uid),
         cid: to.with(doc.cid),
+        gid: to.with(collection.gid),
         txn: to.with(doc.txn),
         updated_at: doc.updated_at,
         expire_at: doc.expire_at,

@@ -292,6 +292,10 @@ impl Collection {
         if !select_fields.contains(&field) {
             select_fields.push(field);
         }
+        let field = "price".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
 
         if with_pk {
             let field = "day".to_string();
@@ -456,12 +460,17 @@ impl Collection {
     pub async fn update_status(
         &mut self,
         db: &scylladb::ScyllaDB,
+        gid: xid::Id,
         status: i8,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
         self.get_one(
             db,
-            vec!["status".to_string(), "updated_at".to_string()],
+            vec![
+                "gid".to_string(),
+                "status".to_string(),
+                "updated_at".to_string(),
+            ],
             None,
         )
         .await?;
@@ -469,8 +478,18 @@ impl Collection {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Collection updated_at conflict, expected updated_at {}, got {}",
+                    "Collection updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
+                ),
+            )
+            .into());
+        }
+        if self.gid != gid {
+            return Err(HTTPError::new(
+                403,
+                format!(
+                    "Collection gid conflict, expected {}, got {}",
+                    gid, self.gid
                 ),
             )
             .into());
@@ -539,6 +558,7 @@ impl Collection {
     pub async fn update(
         &mut self,
         db: &scylladb::ScyllaDB,
+        gid: xid::Id,
         cols: ColumnsMap,
         updated_at: i64,
     ) -> anyhow::Result<bool> {
@@ -553,6 +573,7 @@ impl Collection {
         self.get_one(
             db,
             vec![
+                "gid".to_string(),
                 "updated_at".to_string(),
                 "price".to_string(),
                 "creation_price".to_string(),
@@ -564,12 +585,23 @@ impl Collection {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Collection updated_at conflict, expected updated_at {}, got {}",
+                    "Collection updated_at conflict, expected {}, got {}",
                     self.updated_at, updated_at
                 ),
             )
             .into());
         }
+        if self.gid != gid {
+            return Err(HTTPError::new(
+                403,
+                format!(
+                    "Collection gid conflict, expected {}, got {}",
+                    gid, self.gid
+                ),
+            )
+            .into());
+        }
+
         if self.price < 0 && cols.has("price") {
             return Err(HTTPError::new(
                 400,
@@ -621,19 +653,33 @@ impl Collection {
         Ok(true)
     }
 
-    pub async fn delete(&mut self, db: &scylladb::ScyllaDB) -> anyhow::Result<bool> {
+    pub async fn delete(&mut self, db: &scylladb::ScyllaDB, gid: xid::Id) -> anyhow::Result<bool> {
         let res = self
-            .get_one(db, vec!["status".to_string(), "mid".to_string()], None)
+            .get_one(
+                db,
+                vec!["status".to_string(), "mid".to_string(), "gid".to_string()],
+                None,
+            )
             .await;
         if res.is_err() {
             return Ok(false); // already deleted
+        }
+        if self.gid != gid {
+            return Err(HTTPError::new(
+                403,
+                format!(
+                    "Collection gid conflict, expected {}, got {}",
+                    gid, self.gid
+                ),
+            )
+            .into());
         }
 
         if self.status != -1 {
             return Err(HTTPError::new(
                 409,
                 format!(
-                    "Collection delete conflict, expected status -1, got {}",
+                    "Collection status conflict, expected -1, got {}",
                     self.status
                 ),
             )
@@ -644,7 +690,7 @@ impl Collection {
         let query = "DELETE FROM collection WHERE day=? AND id=?";
         let params = (self.day, self.id.to_cql());
         let _ = db.execute(query, params).await?;
-        let _ = Message::with_pk(self.mid).delete(db).await;
+        let _ = Message::with_pk(self.mid).delete(db, self.id).await;
 
         Ok(true)
     }
@@ -661,19 +707,22 @@ impl Collection {
         let fields = Self::select_fields(select_fields, true)?;
 
         let mut res: Vec<Self> = Vec::new();
-        let query = if status.is_some() {
-            format!(
-                "SELECT {} FROM collection WHERE day=? AND gid=? AND status=? LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
+        let status = status.unwrap_or(0);
+        let query = match status {
+            v if v == -1 || v == 2 => {
+                format!(
+                    "SELECT {} FROM collection WHERE day=? AND gid=? AND status=? LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
                 fields.clone().join(",")
-            )
-        } else {
-            format!(
-                "SELECT {} FROM collection WHERE day=? AND gid=? AND status>=0 LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
-                fields.clone().join(",")
-            )
+                )
+            }
+            _ => {
+                format!(
+                    "SELECT {} FROM collection WHERE day=? AND gid=? AND status>=? LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
+                    fields.clone().join(",")
+                )
+            }
         };
 
-        let status = status.unwrap_or(2);
         let mut day = if let Some(id) = page_token {
             xid_day(id) - 1
         } else {
@@ -925,7 +974,7 @@ mod tests {
         .unwrap();
 
         let mut msg = Message::with_pk(mid);
-        msg.attach_to = gid;
+        msg.attach_to = id;
         msg.kind = "collection.info".to_string();
         msg.language = Language::Eng;
         msg.version = 1;
@@ -990,7 +1039,7 @@ mod tests {
 
             assert_eq!(doc2.gid, gid);
             assert_eq!(doc2.mid, mid);
-            assert_eq!(doc2._info.is_some(), true);
+            assert!(doc2._info.is_some());
             let (lang, info) = doc2.to_info(Language::Und).unwrap();
             assert_eq!(lang, Language::Eng);
             assert_eq!(info.title.as_str(), "Hello World");
@@ -1001,7 +1050,7 @@ mod tests {
                 .unwrap();
             assert_eq!(doc3.gid, gid);
             assert_eq!(doc3.updated_at, 0);
-            assert_eq!(doc3._info.is_some(), true);
+            assert!(doc3._info.is_some());
             let (lang, info) = doc3.to_info(Language::Eng).unwrap();
             assert_eq!(lang, Language::Eng);
             assert_eq!(info.title.as_str(), "Hello World");
@@ -1021,14 +1070,14 @@ mod tests {
             let mut doc = Collection::with_pk(id);
             let mut cols = ColumnsMap::new();
             cols.set_as("version", &2i16);
-            let res = doc.update(db, cols, 0).await;
+            let res = doc.update(db, gid, cols, 0).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // version is not updatable
 
             let mut cols = ColumnsMap::new();
             cols.set_as("price", &50i64);
-            let res = doc.update(db, cols, 1).await;
+            let res = doc.update(db, gid, cols, 1).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // updated_at not match
@@ -1037,7 +1086,7 @@ mod tests {
             cols.set_as("price", &50i64);
             cols.set_as("creation_price", &-1i64);
             doc.get_one(db, vec![], None).await.unwrap();
-            let res = doc.update(db, cols, doc.updated_at).await.unwrap();
+            let res = doc.update(db, gid, cols, doc.updated_at).await.unwrap();
             assert!(res);
             doc.get_one(db, vec![], None).await.unwrap();
             assert_eq!(doc.price, 50);
@@ -1045,7 +1094,7 @@ mod tests {
 
             let mut cols = ColumnsMap::new();
             cols.set_as("creation_price", &10i64);
-            let res = doc.update(db, cols, doc.updated_at).await;
+            let res = doc.update(db, gid, cols, doc.updated_at).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // creation_price is not updatable
@@ -1056,14 +1105,14 @@ mod tests {
             let mut doc = Collection::with_pk(id);
             doc.get_one(db, vec![], None).await.unwrap();
 
-            let res = doc.update_status(db, 2, 1).await;
+            let res = doc.update_status(db, gid, 2, 1).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // version not match
 
-            let res = doc.update_status(db, 2, doc.updated_at).await.unwrap();
-            assert_eq!(res, true); // no need to update
-            let res = doc.update_status(db, 1, doc.updated_at).await;
+            let res = doc.update_status(db, gid, 2, doc.updated_at).await.unwrap();
+            assert!(res); // no need to update
+            let res = doc.update_status(db, gid, 1, doc.updated_at).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 400); // version not match
@@ -1082,7 +1131,7 @@ mod tests {
             assert_eq!(err.code, 400); // gid not match
 
             let res = doc.update_field(db, "rating").await.unwrap();
-            assert_eq!(res, true);
+            assert!(res);
 
             let mut doc2 = Collection::with_pk(id);
             doc2.get_one(db, vec![], None).await.unwrap();
@@ -1092,13 +1141,13 @@ mod tests {
         // delete
         {
             let mut doc = Collection::with_pk(id);
-            let res = doc.delete(db).await;
+            let res = doc.delete(db, gid).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 409); // version not match
 
             let mut doc = Collection::with_pk(xid::new());
-            let res = doc.delete(db).await.unwrap();
+            let res = doc.delete(db, gid).await.unwrap();
             assert!(!res);
         }
     }
@@ -1117,8 +1166,9 @@ mod tests {
         )
         .unwrap();
 
+        let mut parent = Collection::with_pk(xid::new());
         let mut msg = Message::with_pk(mid);
-        msg.attach_to = gid;
+        msg.attach_to = parent.id;
         msg.kind = "collection.info".to_string();
         msg.language = Language::Eng;
         msg.version = 1;
@@ -1126,7 +1176,6 @@ mod tests {
         msg.message = message.clone();
         msg.save(db).await.unwrap();
 
-        let mut parent = Collection::with_pk(xid::new());
         parent.gid = gid;
         parent.mid = mid;
         parent.save(db).await.unwrap();
@@ -1139,10 +1188,10 @@ mod tests {
             ..Default::default()
         };
         let res = child1.save(db).await.unwrap();
-        assert_eq!(res, true);
+        assert!(res);
 
         let res = child1.save(db).await.unwrap();
-        assert_eq!(res, false);
+        assert!(!res);
 
         assert_eq!(
             CollectionChildren::count_children(db, parent.id)
@@ -1159,7 +1208,7 @@ mod tests {
             ..Default::default()
         };
         let res = child2.save(db).await.unwrap();
-        assert_eq!(res, true);
+        assert!(res);
 
         let mut child3 = CollectionChildren {
             id: parent.id,
@@ -1169,7 +1218,7 @@ mod tests {
             ..Default::default()
         };
         let res = child3.save(db).await.unwrap();
-        assert_eq!(res, true);
+        assert!(res);
 
         assert_eq!(
             CollectionChildren::count_children(db, parent.id)
@@ -1197,9 +1246,9 @@ mod tests {
             vec![child2.cid, child1.cid, child3.cid]
         );
         let res = child2.delete(db).await.unwrap();
-        assert_eq!(res, true);
+        assert!(res);
         let res = child2.delete(db).await.unwrap();
-        assert_eq!(res, false);
+        assert!(!res);
 
         let children = CollectionChildren::list_children(db, parent.id)
             .await
@@ -1220,15 +1269,15 @@ mod tests {
             vec![child3.cid]
         );
 
-        let res = parent.delete(db).await;
+        let res = parent.delete(db, gid).await;
         assert!(res.is_err());
         let err: erring::HTTPError = res.unwrap_err().into();
         assert_eq!(err.code, 409);
         parent
-            .update_status(db, -1, parent.updated_at)
+            .update_status(db, gid, -1, parent.updated_at)
             .await
             .unwrap();
-        parent.delete(db).await.unwrap();
+        parent.delete(db, gid).await.unwrap();
         let children = CollectionChildren::list_children(db, parent.id)
             .await
             .unwrap();

@@ -53,7 +53,7 @@ pub fn validate_cbor_content(content: &PackObject<Vec<u8>>) -> Result<(), Valida
 pub fn segment_content(
     content: Option<PackObject<Vec<u8>>>,
     percentage: f32,
-) -> (bool, Option<PackObject<Vec<u8>>>) {
+) -> Option<PackObject<Vec<u8>>> {
     if let Some(ref data) = content {
         let to = data.unit();
         if let Ok(mut doc) = cbor_from_slice::<DocumentNode>(data) {
@@ -61,12 +61,12 @@ pub fn segment_content(
                 let len = (content.len() as f32 * percentage) as usize;
                 content.truncate(len);
                 if let Ok(data) = cbor_to_vec(&doc) {
-                    return (true, Some(to.with(data)));
+                    return Some(to.with(data));
                 }
             }
         }
     }
-    (false, content)
+    content
 }
 
 impl Serialize for AttrValue {

@@ -94,9 +94,17 @@ pub struct QueryIdCid {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+pub struct QueryGidIdCid {
+    pub gid: PackObject<xid::Id>,
+    pub id: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
 pub struct QueryGidId {
     pub gid: PackObject<xid::Id>,
     pub id: PackObject<xid::Id>,
+    pub status: Option<i8>,
     pub fields: Option<String>,
 }
 
@@ -120,6 +128,18 @@ pub struct Pagination {
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct GIDPagination {
+    pub gid: PackObject<xid::Id>,
+    pub page_token: Option<PackObject<Vec<u8>>>,
+    #[validate(range(min = 2, max = 1000))]
+    pub page_size: Option<u16>,
+    #[validate(range(min = -1, max = 2))]
+    pub status: Option<i8>,
+    pub fields: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct IDGIDPagination {
+    pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
     pub page_token: Option<PackObject<Vec<u8>>>,
     #[validate(range(min = 2, max = 1000))]
@@ -154,13 +174,31 @@ pub struct UpdateStatusInput {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Validate)]
-pub struct SubscriptionInputOutput {
+#[derive(Debug, Default, Deserialize, Validate)]
+pub struct SubscriptionInput {
     pub uid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub txn: PackObject<xid::Id>,
     pub updated_at: i64,
     pub expire_at: i64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct SubscriptionOutput {
+    pub uid: PackObject<xid::Id>,
+    pub cid: PackObject<xid::Id>,
+    pub gid: PackObject<xid::Id>,
+    pub txn: PackObject<xid::Id>,
+    pub updated_at: i64,
+    pub expire_at: i64,
+}
+// Request for Payment
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RFP {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creation: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection: Option<i64>,
 }
 
 pub fn get_fields(fields: Option<String>) -> Vec<String> {

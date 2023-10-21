@@ -21,12 +21,16 @@ pub struct CreateBookmarkInput {
     pub gid: PackObject<xid::Id>,
     pub cid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
+    #[serde(default)]
+    #[validate(range(min = 0, max = 2))]
+    pub kind: i8,
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     #[validate(length(min = 4, max = 256))]
     pub title: String,
     #[validate(length(min = 0, max = 5))]
     pub labels: Option<Vec<String>>,
+    pub payload: Option<PackObject<Vec<u8>>>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -46,6 +50,8 @@ pub struct BookmarkOutput {
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<PackObject<Vec<u8>>>,
 }
 
 impl BookmarkOutput {
@@ -66,6 +72,7 @@ impl BookmarkOutput {
                 "updated_at" => rt.updated_at = Some(val.updated_at),
                 "title" => rt.title = Some(val.title.to_owned()),
                 "labels" => rt.labels = Some(val.labels.to_owned()),
+                "payload" => rt.payload = Some(to.with(val.payload.to_owned())),
                 _ => {}
             }
         }
@@ -111,6 +118,7 @@ pub async fn create(
             version: Some(input.version),
             title: Some(input.title),
             labels: input.labels,
+            payload: input.payload,
         }
         .into()?;
         ctx.set_kvs(vec![
@@ -133,6 +141,7 @@ pub async fn create(
         version: input.version,
         title: input.title,
         labels: input.labels.unwrap_or_default(),
+        payload: input.payload.unwrap_or_default().unwrap(),
         ..Default::default()
     };
 
@@ -255,6 +264,7 @@ pub struct UpdateBookmarkInput {
     pub title: Option<String>,
     #[validate(length(min = 0, max = 20))]
     pub labels: Option<Vec<String>>,
+    pub payload: Option<PackObject<Vec<u8>>>,
 }
 
 impl UpdateBookmarkInput {
@@ -268,6 +278,9 @@ impl UpdateBookmarkInput {
         }
         if let Some(labels) = self.labels {
             cols.set_as("labels", &labels);
+        }
+        if let Some(payload) = self.payload {
+            cols.set_as("payload", &*payload);
         }
 
         if cols.is_empty() {
