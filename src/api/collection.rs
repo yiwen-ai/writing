@@ -265,29 +265,28 @@ pub async fn get(
     valid_user(ctx.user)?;
 
     let id = *input.id.to_owned();
-    let gid = *input.gid.to_owned();
-    let status = input.status.unwrap_or(2);
+    let user_gid = *input.gid.to_owned();
 
     ctx.set_kvs(vec![
         ("action", "get_collection".into()),
         ("id", id.to_string().into()),
-        ("gid", gid.to_string().into()),
+        ("user_gid", user_gid.to_string().into()),
     ])
     .await;
 
     let mut doc = db::Collection::with_pk(id);
     let fields = get_fields(input.fields.clone());
     doc.get_one(&app.scylla, fields, ctx.language).await?;
-    if status == 2 && doc.rating > ctx.rating {
+    if doc.status == 2 && doc.rating > ctx.rating {
         return Err(HTTPError::new(451, "Collection unavailable".to_string()));
     }
-    if status < 2 && doc.gid != gid {
+    if doc.status < 2 && doc.gid != user_gid {
         return Err(HTTPError::new(403, "Collection gid not match".to_string()));
     }
     let price = doc.price;
     let mut output = CollectionOutput::from(doc, &to);
     if price > 0 {
-        if ctx.user > db::MIN_ID && *output.gid != gid {
+        if ctx.user > db::MIN_ID && *output.gid != user_gid {
             let mut subscription = db::CollectionSubscription::with_pk(ctx.user, id);
             if subscription.get_one(&app.scylla, vec![]).await.is_ok() {
                 output.subscription = Some(SubscriptionOutput {
@@ -302,10 +301,12 @@ pub async fn get(
         }
         match output.subscription {
             None => {
-                output.rfp = Some(RFP {
-                    creation: None,
-                    collection: Some(price),
-                })
+                if *output.gid != user_gid {
+                    output.rfp = Some(RFP {
+                        creation: None,
+                        collection: Some(price),
+                    })
+                }
             }
             Some(ref sub) => {
                 if sub.expire_at < ctx.unix_ms as i64 {
@@ -886,7 +887,7 @@ pub async fn list_children(
     input.validate()?;
 
     let id = *input.id.to_owned();
-    let gid = *input.gid.to_owned();
+    let user_gid = *input.gid.to_owned();
     let status = input.status.unwrap_or(0);
     let token = token_to_xid(&input.page_token);
     let page_size = input.page_size.unwrap_or(10) as usize;
@@ -894,7 +895,7 @@ pub async fn list_children(
     ctx.set_kvs(vec![
         ("action", "list_collection_child".into()),
         ("id", id.to_string().into()),
-        ("gid", gid.to_string().into()),
+        ("user_gid", user_gid.to_string().into()),
         ("status", status.into()),
     ])
     .await;
@@ -1003,7 +1004,7 @@ pub async fn list_children(
                         }
                         _ => {
                             // get for owner
-                            if child.kind == 0 && icreation.gid == gid {
+                            if child.kind == 0 && icreation.gid == user_gid {
                                 let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
                                 doc.get_one(
                                     &app.scylla,
@@ -1033,7 +1034,7 @@ pub async fn list_children(
         }
 
         if (output.status == 2 && output.rating <= ctx.rating)
-            || (output.status >= status && *output.gid == gid)
+            || (output.status >= status && *output.gid == user_gid)
         {
             res.push(output)
         }
@@ -1055,14 +1056,14 @@ pub async fn list_by_child(
     input.validate()?;
     valid_user(ctx.user)?;
 
-    let gid = *input.gid.to_owned();
+    let user_gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
     let status = input.status.unwrap_or(0);
     let fields = get_fields(input.fields.to_owned());
 
     ctx.set_kvs(vec![
         ("action", "list_collection_by_child".into()),
-        ("gid", gid.to_string().into()),
+        ("user_gid", user_gid.to_string().into()),
         ("cid", cid.to_string().into()),
     ])
     .await;
@@ -1077,10 +1078,10 @@ pub async fn list_by_child(
             .await
             .is_ok()
             && ((doc.status == 2 && doc.rating <= ctx.rating)
-                || (doc.status >= status && doc.gid == gid))
+                || (doc.status >= status && doc.gid == user_gid))
         {
             let price = doc.price;
-            let subscription = if price > 0 && ctx.user > db::MIN_ID && doc.gid != gid {
+            let subscription = if price > 0 && ctx.user > db::MIN_ID && doc.gid != user_gid {
                 let mut subscription = db::CollectionSubscription::with_pk(ctx.user, doc.id);
                 if subscription.get_one(&app.scylla, vec![]).await.is_ok() {
                     Some(subscription)
@@ -1110,10 +1111,12 @@ pub async fn list_by_child(
                     });
                 }
                 None => {
-                    output.rfp = Some(RFP {
-                        creation: None,
-                        collection: Some(price),
-                    })
+                    if *output.gid != user_gid {
+                        output.rfp = Some(RFP {
+                            creation: None,
+                            collection: Some(price),
+                        })
+                    }
                 }
             }
 
