@@ -266,6 +266,7 @@ CREATE TABLE IF NOT EXISTS message (
     updated_at BIGINT, -- updated at, unix time, ms
     context    TEXT,   -- contextual definition for translation
     language   TEXT,   -- message's language, ISO 639-3
+    languages  SET<TEXT>, -- exists languages, ISO 639-3
     version    SMALLINT,   -- creation version
     message    BLOB,   -- original message in CBOR format
     abk        BLOB,   -- Abkhazian message

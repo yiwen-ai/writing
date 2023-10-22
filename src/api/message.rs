@@ -40,6 +40,7 @@ pub fn validate_message(data: &PackObject<Vec<u8>>) -> Result<(), ValidationErro
 pub struct MessageOutput {
     pub id: PackObject<xid::Id>,
     pub i18n_messages: HashMap<String, PackObject<Vec<u8>>>,
+    pub languages: Vec<PackObject<Language>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attach_to: Option<PackObject<xid::Id>>,
@@ -78,6 +79,16 @@ impl MessageOutput {
                 "message" => rt.message = Some(to.with(val.message.to_owned())),
                 _ => {}
             }
+        }
+
+        if !val.languages.is_empty() {
+            rt.languages = val
+                .languages
+                .iter()
+                .map(|v| to.with(v.to_owned()))
+                .collect();
+            rt.languages
+                .sort_by(|a, b| a.to_639_3().partial_cmp(b.to_639_3()).unwrap());
         }
 
         if !val._i18n_messages.is_empty() {

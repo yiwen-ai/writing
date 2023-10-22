@@ -66,6 +66,8 @@ pub struct CollectionOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<PackObject<Language>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<PackObject<Language>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub info: Option<db::CollectionInfo>,
@@ -98,14 +100,16 @@ impl CollectionOutput {
         }
 
         if let Some(msg) = val._info {
-            rt.language = Some(to.with(msg.language));
-            rt.version = Some(msg.version);
+            let msg = message::MessageOutput::from(msg, to);
+            rt.language = msg.language;
+            rt.version = msg.version;
+            rt.languages = Some(msg.languages);
 
-            if let Ok(info) = db::CollectionInfo::from_message(&msg.message) {
+            if let Ok(info) = db::CollectionInfo::from_message(&msg.message.unwrap_or_default()) {
                 rt.info = Some(info);
             }
             let mut i18n_info = HashMap::new();
-            for (k, v) in msg._i18n_messages {
+            for (k, v) in msg.i18n_messages {
                 if let Ok(info) = db::CollectionInfo::from_message(&v) {
                     i18n_info.insert(k, info);
                 }

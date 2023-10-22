@@ -1,7 +1,7 @@
 use isolang::Language;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::TryFrom,
 };
 
@@ -45,6 +45,7 @@ pub struct Message {
     pub updated_at: i64,
     pub context: String,
     pub language: Language,
+    pub languages: HashSet<Language>,
     pub version: i16,
     pub message: Vec<u8>,
 
@@ -125,6 +126,10 @@ impl Message {
         if let Some(i) = select_fields.iter().position(|s| s == "i18n") {
             select_fields.remove(i);
             let field = "message".to_string();
+            if !select_fields.contains(&field) {
+                select_fields.push(field);
+            }
+            let field = "languages".to_string();
             if !select_fields.contains(&field) {
                 select_fields.push(field);
             }
@@ -371,11 +376,12 @@ impl Message {
             db.execute(query, params).await?
         } else {
             let query = format!(
-                "UPDATE message SET updated_at=?,{}=? WHERE day=? AND id=? IF version=?",
+                "UPDATE message SET updated_at=?,languages=languages+{{?}},{}=? WHERE day=? AND id=? IF version=?",
                 lang
             );
             let params = (
                 new_updated_at,
+                lang.to_cql(),
                 message.to_cql(),
                 self.day,
                 self.id.to_cql(),
@@ -589,6 +595,7 @@ mod tests {
             assert_eq!(doc.version, 1);
             assert_eq!(doc.language, Language::Eng);
             assert_eq!(doc.message, message);
+            assert!(doc.languages.is_empty());
             assert!(doc._fields.contains(&"zho".to_string()));
             assert!(doc._i18n_messages.is_empty());
 
@@ -607,6 +614,8 @@ mod tests {
             assert_eq!(doc2.context.as_str(), "");
             assert_eq!(doc2.version, 1);
             assert_eq!(doc2.language, Language::Eng);
+            assert_eq!(doc2.languages.len(), 1);
+            assert_eq!(doc2.languages.contains(&Language::Zho), true);
             assert_eq!(doc2.message, message);
             assert!(doc2._fields.contains(&"zho".to_string()));
             assert!(doc2._i18n_messages.len() == 1);

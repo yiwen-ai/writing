@@ -408,7 +408,11 @@ impl Collection {
 
         if self._fields.contains(&"mid".to_string()) {
             let mut msg = Message::with_pk(self.mid);
-            let mut msg_fields = vec!["language".to_string(), "message".to_string()];
+            let mut msg_fields = vec![
+                "language".to_string(),
+                "languages".to_string(),
+                "message".to_string(),
+            ];
             if let Some(lang) = language {
                 let lang = lang.to_639_3();
                 if support_language(lang) {
@@ -758,7 +762,11 @@ impl Collection {
         res.sort_by(|a, b| b.id.partial_cmp(&a.id).unwrap());
 
         if fields.contains(&"mid".to_string()) {
-            let mut msg_fields = vec!["language".to_string(), "message".to_string()];
+            let mut msg_fields = vec![
+                "language".to_string(),
+                "languages".to_string(),
+                "message".to_string(),
+            ];
             if let Some(lang) = language {
                 let lang = lang.to_639_3();
                 if support_language(lang) {
@@ -825,7 +833,11 @@ impl Collection {
         res.sort_by(|a, b| b.id.partial_cmp(&a.id).unwrap());
 
         if fields.contains(&"mid".to_string()) {
-            let mut msg_fields = vec!["language".to_string(), "message".to_string()];
+            let mut msg_fields = vec![
+                "language".to_string(),
+                "languages".to_string(),
+                "message".to_string(),
+            ];
             if let Some(lang) = language {
                 let lang = lang.to_639_3();
                 if support_language(lang) {
