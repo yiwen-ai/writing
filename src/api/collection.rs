@@ -309,7 +309,7 @@ pub async fn get(
                 }
             }
             Some(ref sub) => {
-                if sub.expire_at < ctx.unix_ms as i64 {
+                if sub.expire_at * 1000 < ctx.unix_ms as i64 {
                     output.rfp = Some(RFP {
                         creation: None,
                         collection: Some(price),
@@ -1095,7 +1095,7 @@ pub async fn list_by_child(
             let mut output = CollectionOutput::from(doc, &to);
             match subscription {
                 Some(s) => {
-                    if s.expire_at < ctx.unix_ms as i64 {
+                    if s.expire_at * 1000 < ctx.unix_ms as i64 {
                         output.rfp = Some(RFP {
                             creation: None,
                             collection: Some(price),

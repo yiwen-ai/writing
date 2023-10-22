@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS collection_subscription (
     cid        BLOB,   -- collection id, 12 bytes XID
     txn        BLOB,   -- latest subscription transaction id, 12 bytes XID
     updated_at BIGINT, -- updated at, unix time, ms
-    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    expire_at  BIGINT, -- subscription expire at, unix time, second!!
     PRIMARY KEY (uid, cid)
 ) WITH CLUSTERING ORDER BY (cid DESC)
     AND caching = {'enabled': 'true'}
@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS creation_subscription (
     cid        BLOB,   -- creation id, 12 bytes XID
     txn        BLOB,   -- latest subscription transaction id, 12 bytes XID
     updated_at BIGINT, -- updated at, unix time, ms
-    expire_at  BIGINT, -- subscription expire at, unix time, ms
+    expire_at  BIGINT, -- subscription expire at, unix time, second!!
     PRIMARY KEY (uid, cid)
 ) WITH CLUSTERING ORDER BY (cid DESC)
     AND caching = {'enabled': 'true'}

@@ -419,7 +419,8 @@ async fn try_get_subscription(
     }
 
     let mut subscription = db::CreationSubscription::with_pk(uid, creation.id);
-    if subscription.get_one(scylla, vec![]).await.is_ok() && subscription.expire_at >= now_ms {
+    if subscription.get_one(scylla, vec![]).await.is_ok() && subscription.expire_at * 1000 >= now_ms
+    {
         return (None, Some(subscription));
     }
 
@@ -451,7 +452,7 @@ async fn try_get_subscription(
             .get_one(scylla, vec!["expire_at".to_string()])
             .await
             .is_ok()
-            && doc.expire_at >= now_ms
+            && doc.expire_at * 1000 >= now_ms
         {
             return (None, subscription);
         }
