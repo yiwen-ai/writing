@@ -33,3 +33,10 @@ pub fn xid_day(xid: xid::Id) -> i32 {
     let unix_ts = u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]);
     (unix_ts / (3600 * 24)) as i32
 }
+
+pub fn day_to_xid(day: i32) -> xid::Id {
+    let unix_ts = (day as u32) * 3600 * 24;
+    let mut raw = [0_u8; 12];
+    raw[0..=3].copy_from_slice(&unix_ts.to_be_bytes());
+    xid::Id(raw)
+}

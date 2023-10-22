@@ -8,8 +8,8 @@ use scylla_orm::{ColumnsMap, CqlValue, FromCqlVal, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
 use crate::db::{
-    meili, scylladb, scylladb::extract_applied, support_language, xid_day, Message, MessageTexts,
-    MessageValue,
+    day_to_xid, meili, scylladb, scylladb::extract_applied, support_language, xid_day, Message,
+    MessageTexts, MessageValue,
 };
 
 #[derive(Debug, Default, Clone, CqlOrm, PartialEq)]
@@ -729,9 +729,11 @@ impl Collection {
             (unix_ms() / (1000 * 3600 * 24)) as i32
         };
 
-        while day > 0 {
+        let mut i = 0i8;
+        while day > 19650 && i < 30 {
             let params = (day, gid.to_cql(), status);
             let rows = db.execute_iter(query.as_str(), params).await?;
+
             for row in rows {
                 let mut doc = Self::default();
                 let mut cols = ColumnsMap::with_capacity(fields.len());
@@ -744,14 +746,14 @@ impl Collection {
             if res.len() >= page_size as usize {
                 break;
             }
-
+            i += 1;
             day -= 1;
         }
 
-        let next = if res.is_empty() {
-            None
+        let next = if day > 19650 {
+            Some(day_to_xid(day))
         } else {
-            Some(res.last().unwrap().id)
+            None
         };
         res.sort_by(|a, b| b.id.partial_cmp(&a.id).unwrap());
 
