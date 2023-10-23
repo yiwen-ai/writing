@@ -240,6 +240,8 @@ pub struct QueryPublicationInputput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub fields: Option<String>,
+    pub parent: Option<PackObject<xid::Id>>,
+    pub subscription_in: Option<PackObject<xid::Id>>,
 }
 
 pub async fn get(
@@ -254,6 +256,8 @@ pub async fn get(
     let gid = *input.gid.to_owned();
     let cid = *input.cid.to_owned();
     let language = *input.language.to_owned();
+    let parent = *input.parent.to_owned().unwrap_or_default();
+    let subscription_in = input.subscription_in.to_owned().map(|id| id.unwrap());
 
     ctx.set_kvs(vec![
         ("action", "get_publication".into()),
@@ -264,10 +268,57 @@ pub async fn get(
     ])
     .await;
 
+    let mut index = db::CreationIndex::with_pk(cid);
+    if index.get_one(&app.scylla).await.is_err() {
+        return Err(HTTPError::new(404, "Creation not exists".to_string()));
+    }
+    if gid != index.gid && ctx.rating < index.rating {
+        return Err(HTTPError::new(451, "Can not view publication".to_string()));
+    }
+
     let mut doc = db::Publication::with_pk(gid, cid, language, input.version);
     doc.get_one(&app.scylla, get_fields(input.fields.clone()))
         .await?;
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
+
+    doc._rating = Some(index.rating);
+    doc._price = Some(index.price);
+    let mut output = PublicationOutput::from(doc, &to);
+    output.from_gid = Some(to.with(index.gid));
+
+    if index.price <= 0 {
+        // it is free
+        return Ok(to.with(SuccessResponse::new(output)));
+    }
+
+    // check subscription
+    if let Some(gid) = subscription_in {
+        if parent > db::MIN_ID {
+            // check parent collection
+            let mut child = db::CollectionChildren::with_pk(parent, cid);
+            child.get_one(&app.scylla).await?;
+            if gid == index.gid {
+                // available subscription in parent collection
+                return Ok(to.with(SuccessResponse::new(output)));
+            }
+        }
+
+        let (rfp, subscription) =
+            try_get_subscription(&app.scylla, &index, ctx.user, parent, ctx.unix_ms as i64).await;
+        output.rfp = rfp;
+        if output.rfp.is_some() {
+            output.content = segment_content(output.content, 0.6);
+        }
+        output.subscription = subscription.map(|s| SubscriptionOutput {
+            uid: to.with(s.uid),
+            cid: to.with(s.cid),
+            gid: to.with(index.gid),
+            txn: to.with(s.txn),
+            updated_at: s.updated_at,
+            expire_at: s.expire_at,
+        });
+    }
+
+    Ok(to.with(SuccessResponse::new(output)))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -281,47 +332,6 @@ pub struct ImplicitQueryPublicationInputput {
 }
 
 pub async fn implicit_get(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<ImplicitQueryPublicationInputput>,
-) -> Result<PackObject<SuccessResponse<PublicationOutput>>, HTTPError> {
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let cid = *input.cid.to_owned();
-    let gid = input.gid.to_owned().unwrap_or_default().unwrap();
-    let mut language = input.language.to_owned().unwrap_or_default().unwrap();
-    if language == Language::Und {
-        language = ctx.language.unwrap_or_default()
-    }
-
-    ctx.set_kvs(vec![
-        ("action", "implicit_get_publication".into()),
-        ("gid", gid.to_string().into()),
-        ("cid", cid.to_string().into()),
-        ("language", language.to_639_3().into()),
-    ])
-    .await;
-
-    let mut index = db::CreationIndex::with_pk(cid);
-    if index.get_one(&app.scylla).await.is_err() {
-        return Err(HTTPError::new(404, "Creation not exists".to_string()));
-    }
-    if gid != index.gid && ctx.rating < index.rating {
-        return Err(HTTPError::new(451, "Can not view publication".to_string()));
-    }
-
-    let mut doc = db::Publication::get_implicit_published(&app.scylla, gid, cid, language).await?;
-    doc.get_one(&app.scylla, get_fields(input.fields.clone()))
-        .await?;
-
-    doc._rating = Some(index.rating);
-    doc._price = Some(index.price);
-    Ok(to.with(SuccessResponse::new(PublicationOutput::from(doc, &to))))
-}
-
-pub async fn implicit_get_beta(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<()>,
@@ -541,41 +551,6 @@ pub async fn list_by_gids(
     .await;
 
     let fields = input.fields.unwrap_or_default();
-    let (res, next_page_token) = db::Publication::list_by_gids(
-        &app.scylla,
-        input.gids.into_iter().map(|v| v.unwrap()).collect(),
-        fields,
-        token_to_xid(&input.page_token),
-        ctx.language,
-    )
-    .await?;
-
-    Ok(to.with(SuccessResponse {
-        total_size: None,
-        next_page_token: to.with_option(token_from_xid(next_page_token)),
-        result: res
-            .iter()
-            .map(|r| PublicationOutput::from(r.to_owned(), &to))
-            .collect(),
-    }))
-}
-
-pub async fn list_by_gids_beta(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<GidsPagination>,
-) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    ctx.set_kvs(vec![
-        ("action", "list_publications_by_gids".into()),
-        ("gids", input.gids.len().into()),
-    ])
-    .await;
-
-    let fields = input.fields.unwrap_or_default();
     let (res, next_page_token) = db::PublicationIndex::list_by_gids(
         &app.scylla,
         input.gids.into_iter().map(|v| v.unwrap()).collect(),
@@ -654,44 +629,6 @@ pub async fn get_publish_list(
         return Err(HTTPError::new(451, "Can not view publication".to_string()));
     }
 
-    let docs = db::Publication::list_published_by_cid(&app.scylla, gid, cid, status).await?;
-
-    ctx.set("total_size", docs.len().into()).await;
-    Ok(to.with(SuccessResponse::new(
-        docs.iter()
-            .map(|r| PublicationOutput::from(r.to_owned(), &to))
-            .collect(),
-    )))
-}
-
-pub async fn get_publish_list_beta(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<()>,
-    input: Query<QueryGidCid>,
-) -> Result<PackObject<SuccessResponse<Vec<PublicationOutput>>>, HTTPError> {
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let gid = *input.gid.to_owned();
-    let cid = *input.cid.to_owned();
-    let status = input.status.unwrap_or(2);
-    ctx.set_kvs(vec![
-        ("action", "get_publish_list".into()),
-        ("gid", gid.to_string().into()),
-        ("cid", cid.to_string().into()),
-        ("status", status.into()),
-    ])
-    .await;
-
-    let mut index = db::CreationIndex::with_pk(cid);
-    if index.get_one(&app.scylla).await.is_err() {
-        return Err(HTTPError::new(404, "Creation not exists".to_string()));
-    }
-    if gid != index.gid && ctx.rating < index.rating {
-        return Err(HTTPError::new(451, "Can not view publication".to_string()));
-    }
-
     let published = db::PublicationIndex::list_published_by_cid(&app.scylla, cid).await?;
     let mut docs = db::Publication::batch_get(
         &app.scylla,
@@ -716,26 +653,6 @@ pub async fn get_publish_list_beta(
 }
 
 pub async fn count_publish(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<GIDPagination>,
-) -> Result<PackObject<SuccessResponse<usize>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let gid = input.gid.unwrap();
-    ctx.set_kvs(vec![
-        ("action", "count_publish".into()),
-        ("gid", gid.to_string().into()),
-    ])
-    .await;
-
-    let res = db::Publication::count_published_by_gid(&app.scylla, gid).await?;
-    Ok(to.with(SuccessResponse::new(res)))
-}
-
-pub async fn count_publish_beta(
     State(app): State<Arc<AppState>>,
     Extension(ctx): Extension<Arc<ReqContext>>,
     to: PackObject<GIDPagination>,

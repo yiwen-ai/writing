@@ -125,19 +125,16 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
             Router::new()
                 .route(
                     "/implicit_get",
-                    routing::get(api::publication::implicit_get_beta),
+                    routing::get(api::publication::implicit_get),
                 )
-                .route(
-                    "/publish",
-                    routing::get(api::publication::get_publish_list_beta),
-                )
+                .route("/publish", routing::get(api::publication::get_publish_list))
                 .route(
                     "/count_publish",
-                    routing::post(api::publication::count_publish_beta),
+                    routing::post(api::publication::count_publish),
                 )
                 .route(
                     "/list_by_gids",
-                    routing::post(api::publication::list_by_gids_beta),
+                    routing::post(api::publication::list_by_gids),
                 )
                 .route("/list_latest", routing::post(api::publication::list_latest)),
         )

@@ -874,6 +874,7 @@ pub struct CollectionChildrenOutput {
     pub cover: String,
     pub price: i64,
     pub language: PackObject<Language>,
+    pub version: i16,
     pub title: String,
     pub summary: String,
 }
@@ -998,6 +999,7 @@ pub async fn list_children(
                             output.status = 2;
                             output.updated_at = doc.updated_at;
                             output.language = to.with(doc.language);
+                            output.version = doc.version;
                             output.title = doc.title;
                             output.summary = doc.summary;
                             output.kind = 1;

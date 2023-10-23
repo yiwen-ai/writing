@@ -615,7 +615,7 @@ mod tests {
             assert_eq!(doc2.version, 1);
             assert_eq!(doc2.language, Language::Eng);
             assert_eq!(doc2.languages.len(), 1);
-            assert_eq!(doc2.languages.contains(&Language::Zho), true);
+            assert!(doc2.languages.contains(&Language::Zho));
             assert_eq!(doc2.message, message);
             assert!(doc2._fields.contains(&"zho".to_string()));
             assert!(doc2._i18n_messages.len() == 1);
