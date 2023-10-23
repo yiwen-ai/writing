@@ -12,7 +12,7 @@ use axum_web::object::{cbor_from_slice, cbor_to_vec, PackObject};
 
 use crate::conf;
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Document {
     pub id: String, // base64_raw_url(cbor([cid,language,gid]))
     pub gid: String,

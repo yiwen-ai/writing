@@ -181,6 +181,19 @@ impl Message {
         }
     }
 
+    pub fn to_language_message(&self) -> Vec<(Language, &[u8])> {
+        let mut res: Vec<(Language, &[u8])> = Vec::with_capacity(self.languages.len() + 1);
+        if !self.message.is_empty() {
+            res.push((self.language, self.message.as_slice()));
+        }
+        for lang in &self.languages {
+            if let Some(v) = self._i18n_messages.get(lang.to_639_3()) {
+                res.push((lang.clone(), v.as_slice()));
+            }
+        }
+        res
+    }
+
     pub async fn get_one(
         &mut self,
         db: &scylladb::ScyllaDB,

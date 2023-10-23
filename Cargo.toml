@@ -1,6 +1,6 @@
 [package]
 name = "writing"
-version = "1.3.6"
+version = "1.3.7"
 edition = "2021"
 rust-version = "1.64"
 description = ""

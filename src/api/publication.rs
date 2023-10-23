@@ -318,6 +318,11 @@ pub async fn get(
         });
     }
 
+    ctx.set_kvs(vec![
+        ("rfp", output.rfp.is_some().into()),
+        ("subscription", output.subscription.is_some().into()),
+    ])
+    .await;
     Ok(to.with(SuccessResponse::new(output)))
 }
 
@@ -409,6 +414,11 @@ pub async fn implicit_get(
         });
     }
 
+    ctx.set_kvs(vec![
+        ("rfp", output.rfp.is_some().into()),
+        ("subscription", output.subscription.is_some().into()),
+    ])
+    .await;
     Ok(to.with(SuccessResponse::new(output)))
 }
 
@@ -713,13 +723,24 @@ pub async fn update_status(
         .await?;
     ctx.set("updated", ok.into()).await;
 
-    if input.status == 2 {
+    if ok && input.status == 2 {
         // get full doc for meili
-        doc.get_one(&app.scylla, vec![]).await?;
+        doc.get_one(
+            &app.scylla,
+            vec![
+                "updated_at".to_string(),
+                "genre".to_string(),
+                "title".to_string(),
+                "keywords".to_string(),
+                "authors".to_string(),
+                "summary".to_string(),
+            ],
+        )
+        .await?;
         let meili_start = ctx.start.elapsed().as_millis() as u64;
         if let Err(err) = app
             .meili
-            .add_or_update(meili::Space::Pub(Some(gid)), vec![doc.to_meili()])
+            .add_or_update(meili::Space::Pub(None), vec![doc.to_meili()])
             .await
         {
             log::error!(target: "meilisearch",

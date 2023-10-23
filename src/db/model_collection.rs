@@ -474,6 +474,7 @@ impl Collection {
                 "gid".to_string(),
                 "status".to_string(),
                 "updated_at".to_string(),
+                "mid".to_string(), // for meilisearch
             ],
             None,
         )

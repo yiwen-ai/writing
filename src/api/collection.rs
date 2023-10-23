@@ -318,6 +318,12 @@ pub async fn get(
             }
         }
     }
+
+    ctx.set_kvs(vec![
+        ("rfp", output.rfp.is_some().into()),
+        ("subscription", output.subscription.is_some().into()),
+    ])
+    .await;
     Ok(to.with(SuccessResponse::new(output)))
 }
 
@@ -496,7 +502,7 @@ pub async fn update_info(
     let mut doc = db::Collection::with_pk(id);
     doc.get_one(
         &app.scylla,
-        vec!["gid".to_string(), "mid".to_string()],
+        vec!["gid".to_string(), "mid".to_string(), "status".to_string()],
         None,
     )
     .await?;
@@ -517,6 +523,25 @@ pub async fn update_info(
 
         let meili_start = ctx.start.elapsed().as_millis() as u64;
         let meili_doc = doc.to_meili(language, &message, info.version, info.updated_at)?;
+        if doc.status == 2 {
+            if let Err(err) = app
+                .meili
+                .add_or_update(meili::Space::Pub(None), vec![meili_doc.clone()])
+                .await
+            {
+                log::error!(target: "meilisearch",
+                    action = "add_or_update",
+                    space = "pub",
+                    rid = ctx.rid,
+                    gid = doc.gid.to_string(),
+                    id = doc.id.to_string(),
+                    kind = 2i8,
+                    elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+                    "{}", err.to_string(),
+                );
+            }
+        }
+
         if let Err(err) = app
             .meili
             .add_or_update(meili::Space::Group(doc.gid), vec![meili_doc])
@@ -569,6 +594,31 @@ pub async fn update_status(
         .await?;
 
     ctx.set("updated", ok.into()).await;
+    if ok && doc.status == 2 {
+        // get full doc for meili
+        let meili_start = ctx.start.elapsed().as_millis() as u64;
+        let mut info = db::Message::with_pk(doc.mid);
+        info.get_one(&app.scylla, vec!["i18n".to_string()]).await?;
+        for (language, message) in info.to_language_message() {
+            let meili_doc = doc.to_meili(language, &message, info.version, info.updated_at)?;
+            if let Err(err) = app
+                .meili
+                .add_or_update(meili::Space::Pub(None), vec![meili_doc])
+                .await
+            {
+                log::error!(target: "meilisearch",
+                    action = "add_or_update",
+                    space = "pub",
+                    rid = ctx.rid,
+                    gid = doc.gid.to_string(),
+                    id = doc.id.to_string(),
+                    kind = 2i8,
+                    elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+                    "{}", err.to_string(),
+                );
+            }
+        }
+    }
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(CollectionOutput::from(doc, &to))))
 }
