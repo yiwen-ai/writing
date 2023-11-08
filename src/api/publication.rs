@@ -129,7 +129,7 @@ pub struct PublicationDraftInput {
     pub language: PackObject<isolang::Language>,
     #[validate(length(min = 2, max = 16))]
     pub model: String,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: String,
     #[validate(url)]
     pub cover: String,
@@ -770,7 +770,7 @@ pub struct UpdatePublicationInput {
     pub updated_at: i64,
     #[validate(length(min = 2, max = 16))]
     pub model: Option<String>,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,

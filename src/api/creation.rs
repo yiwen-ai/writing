@@ -320,7 +320,7 @@ pub struct UpdateCreationInput {
     pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
     #[validate(url)]
     pub cover: Option<String>,
@@ -330,7 +330,7 @@ pub struct UpdateCreationInput {
     pub labels: Option<Vec<String>>,
     #[validate(length(min = 0, max = 10))]
     pub authors: Option<Vec<String>>,
-    #[validate(length(min = 4, max = 2048))]
+    #[validate(length(min = 0, max = 2048))]
     pub summary: Option<String>,
     #[validate(url)]
     pub license: Option<String>,

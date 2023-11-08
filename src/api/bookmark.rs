@@ -24,9 +24,9 @@ pub struct CreateBookmarkInput {
     #[serde(default)]
     #[validate(range(min = 0, max = 2))]
     pub kind: i8,
-    #[validate(range(min = 1, max = 10000))]
+    #[validate(range(min = 0, max = 10000))]
     pub version: i16,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: String,
     #[validate(length(min = 0, max = 5))]
     pub labels: Option<Vec<String>>,
@@ -261,7 +261,7 @@ pub struct UpdateBookmarkInput {
     pub updated_at: i64,
     #[validate(range(min = 1, max = 10000))]
     pub version: Option<i16>,
-    #[validate(length(min = 4, max = 256))]
+    #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
     #[validate(length(min = 0, max = 20))]
     pub labels: Option<Vec<String>>,
