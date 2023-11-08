@@ -135,6 +135,7 @@ pub async fn create(
     let mut doc = db::Bookmark {
         uid: ctx.user,
         id: xid::new(),
+        kind: input.kind,
         gid,
         cid,
         language,
