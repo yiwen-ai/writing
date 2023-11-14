@@ -511,15 +511,20 @@ pub async fn update_info(
     }
 
     let mut info = db::Message::with_pk(doc.mid);
+    let mut ok = false;
+    if input.context.is_some() {
+        let cols = input.clone().into()?;
+        ok = info.update(&app.scylla, cols, version).await?;
+    }
+
     if let Some(message) = input.message {
         validate_collection_info(&message)?;
         let language = *input.language.unwrap_or_default();
         ctx.set("language", language.to_639_3().into()).await;
 
-        let ok = info
+        ok = info
             .update_message(&app.scylla, language, &message, version)
             .await?;
-        ctx.set("updated", ok.into()).await;
 
         let meili_start = ctx.start.elapsed().as_millis() as u64;
         let meili_doc = doc.to_meili(language, &message, info.version, info.updated_at)?;
@@ -558,12 +563,9 @@ pub async fn update_info(
                 "{}", err.to_string(),
             );
         }
-    } else {
-        let cols = input.into()?;
-        let ok = info.update(&app.scylla, cols, version).await?;
-        ctx.set("updated", ok.into()).await;
     }
 
+    ctx.set("updated", ok.into()).await;
     Ok(to.with(SuccessResponse::new(message::MessageOutput::from(
         info, &to,
     ))))

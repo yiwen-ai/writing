@@ -160,7 +160,7 @@ pub async fn get(
     Ok(to.with(SuccessResponse::new(MessageOutput::from(doc, &to))))
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize, Validate)]
 pub struct UpdateMessageInput {
     pub id: PackObject<xid::Id>,
     #[validate(range(min = 1, max = 32767))]
@@ -218,14 +218,18 @@ pub async fn update(
         ));
     }
 
-    let ok = if let Some(message) = input.message {
+    let mut ok = false;
+    if input.context.is_some() {
+        let cols = input.clone().into()?;
+        ok = doc.update(&app.scylla, cols, version).await?;
+    }
+
+    if let Some(message) = input.message {
         let language = *input.language.unwrap_or_default();
         ctx.set("language", language.to_639_3().into()).await;
-        doc.update_message(&app.scylla, language, &message, version)
-            .await?
-    } else {
-        let cols = input.into()?;
-        doc.update(&app.scylla, cols, version).await?
+        ok = doc
+            .update_message(&app.scylla, language, &message, version)
+            .await?;
     };
     ctx.set("updated", ok.into()).await;
     Ok(to.with(SuccessResponse::new(MessageOutput::from(doc, &to))))
