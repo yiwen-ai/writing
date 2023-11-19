@@ -14,7 +14,7 @@ use scylla_orm::ColumnsMap;
 
 use crate::api::{
     get_fields, segment_content, token_from_xid, token_to_xid, validate_cbor_content, AppState,
-    GIDPagination, Pagination, QueryGidCid, SubscriptionOutput, RFP,
+    GIDPagination, Pagination, QueryGidCid, RFPInfo, SubscriptionOutput, RFP,
 };
 use crate::{db, db::meili};
 
@@ -302,8 +302,15 @@ pub async fn get(
             }
         }
 
-        let (rfp, subscription) =
-            try_get_subscription(&app.scylla, &index, ctx.user, parent, ctx.unix_ms as i64).await;
+        let (rfp, subscription) = try_get_subscription(
+            &app.scylla,
+            &index,
+            ctx.user,
+            parent,
+            ctx.unix_ms as i64,
+            &to,
+        )
+        .await;
         output.rfp = rfp;
         if output.rfp.is_some() {
             output.content = segment_content(output.content, 0.6);
@@ -398,8 +405,15 @@ pub async fn implicit_get(
             }
         }
 
-        let (rfp, subscription) =
-            try_get_subscription(&app.scylla, &index, ctx.user, parent, ctx.unix_ms as i64).await;
+        let (rfp, subscription) = try_get_subscription(
+            &app.scylla,
+            &index,
+            ctx.user,
+            parent,
+            ctx.unix_ms as i64,
+            &to,
+        )
+        .await;
         output.rfp = rfp;
         if output.rfp.is_some() {
             output.content = segment_content(output.content, 0.6);
@@ -428,9 +442,13 @@ async fn try_get_subscription(
     uid: xid::Id,
     parent: xid::Id,
     now_ms: i64,
+    to: &PackObject<()>,
 ) -> (Option<RFP>, Option<db::CreationSubscription>) {
     let mut rfp = RFP {
-        creation: Some(creation.price),
+        creation: Some(RFPInfo {
+            id: to.with(creation.id),
+            price: creation.price,
+        }),
         collection: None,
     };
 
@@ -485,7 +503,10 @@ async fn try_get_subscription(
             .await
             .is_ok()
         {
-            rfp.collection = Some(doc.price);
+            rfp.collection = Some(RFPInfo {
+                id: to.with(doc.id),
+                price: doc.price,
+            });
         }
     }
 

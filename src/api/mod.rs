@@ -192,13 +192,20 @@ pub struct SubscriptionOutput {
     pub updated_at: i64,
     pub expire_at: i64,
 }
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RFPInfo {
+    pub id: PackObject<xid::Id>,
+    pub price: i64,
+}
+
 // Request for Payment
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RFP {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub creation: Option<i64>,
+    pub creation: Option<RFPInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub collection: Option<i64>,
+    pub collection: Option<RFPInfo>,
 }
 
 pub fn get_fields(fields: Option<String>) -> Vec<String> {

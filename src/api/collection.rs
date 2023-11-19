@@ -17,15 +17,15 @@ use scylla_orm::ColumnsMap;
 
 use super::{
     get_fields, message, token_from_xid, token_to_xid, AppState, GIDPagination, IDGIDPagination,
-    QueryGidCid, QueryGidId, QueryGidIdCid, QueryId, SubscriptionInput, SubscriptionOutput,
-    UpdateStatusInput, RFP,
+    QueryGidCid, QueryGidId, QueryGidIdCid, QueryId, RFPInfo, SubscriptionInput,
+    SubscriptionOutput, UpdateStatusInput, RFP,
 };
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateCollectionInput {
     pub gid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
-    #[validate(length(min = 0, max = 512))]
+    #[validate(length(min = 0, max = 1024))]
     pub context: String,
     pub info: CollectionInfoInput,
     #[validate(url)]
@@ -304,7 +304,10 @@ pub async fn get(
                 if *output.gid != user_gid {
                     output.rfp = Some(RFP {
                         creation: None,
-                        collection: Some(price),
+                        collection: Some(RFPInfo {
+                            id: to.with(id),
+                            price: price,
+                        }),
                     })
                 }
             }
@@ -312,7 +315,10 @@ pub async fn get(
                 if sub.expire_at * 1000 < ctx.unix_ms as i64 {
                     output.rfp = Some(RFP {
                         creation: None,
-                        collection: Some(price),
+                        collection: Some(RFPInfo {
+                            id: to.with(id),
+                            price: price,
+                        }),
                     })
                 }
             }
@@ -738,9 +744,7 @@ pub async fn add_children(
                         child.price = parent.creation_price;
                         child.update_field(&app.scylla, "price").await?;
                     }
-                }
-
-                if parent.gid != child.gid || input.kind == 1 {
+                } else {
                     // ensure the creation is published
                     let _ = db::PublicationIndex::get_implicit_published(
                         &app.scylla,
@@ -1147,29 +1151,37 @@ pub async fn list_by_child(
             };
 
             let mut output = CollectionOutput::from(doc, &to);
-            match subscription {
-                Some(s) => {
-                    if s.expire_at * 1000 < ctx.unix_ms as i64 {
-                        output.rfp = Some(RFP {
-                            creation: None,
-                            collection: Some(price),
-                        })
+            if price > 0 {
+                match subscription {
+                    Some(s) => {
+                        if s.expire_at * 1000 < ctx.unix_ms as i64 {
+                            output.rfp = Some(RFP {
+                                creation: None,
+                                collection: Some(RFPInfo {
+                                    id: to.with(child.id),
+                                    price: price,
+                                }),
+                            })
+                        }
+                        output.subscription = Some(SubscriptionOutput {
+                            uid: to.with(s.uid),
+                            cid: to.with(s.cid),
+                            gid: to.with(*output.gid),
+                            txn: to.with(s.txn),
+                            updated_at: s.updated_at,
+                            expire_at: s.expire_at,
+                        });
                     }
-                    output.subscription = Some(SubscriptionOutput {
-                        uid: to.with(s.uid),
-                        cid: to.with(s.cid),
-                        gid: to.with(*output.gid),
-                        txn: to.with(s.txn),
-                        updated_at: s.updated_at,
-                        expire_at: s.expire_at,
-                    });
-                }
-                None => {
-                    if *output.gid != user_gid {
-                        output.rfp = Some(RFP {
-                            creation: None,
-                            collection: Some(price),
-                        })
+                    None => {
+                        if *output.gid != user_gid {
+                            output.rfp = Some(RFP {
+                                creation: None,
+                                collection: Some(RFPInfo {
+                                    id: to.with(child.id),
+                                    price: price,
+                                }),
+                            })
+                        }
                     }
                 }
             }
