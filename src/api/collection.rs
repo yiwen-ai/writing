@@ -1060,31 +1060,56 @@ pub async fn list_children(
                             output.summary = doc.summary;
                             output.kind = 1;
                         }
-                        _ => {
+                        _ if child.kind == 1 && icreation.gid == user_gid => {
                             // get for owner
-                            if child.kind == 0 && icreation.gid == user_gid {
-                                let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
-                                doc.get_one(
-                                    &app.scylla,
-                                    vec![
-                                        "status".to_string(),
-                                        "title".to_string(),
-                                        "summary".to_string(),
-                                        "updated_at".to_string(),
-                                    ],
-                                )
-                                .await?;
-                                if doc.status >= status {
-                                    output.gid = to.with(doc.gid);
-                                    output.status = doc.status;
-                                    output.updated_at = doc.updated_at;
-                                    output.language = to.with(doc.language);
-                                    output.title = doc.title;
-                                    output.summary = doc.summary;
-                                    output.kind = 0;
-                                }
-                            };
+                            let doc = db::Publication::get_implicit_one(
+                                &app.scylla,
+                                icreation.gid,
+                                icreation.id,
+                                language,
+                                vec![
+                                    "status".to_string(),
+                                    "title".to_string(),
+                                    "summary".to_string(),
+                                    "updated_at".to_string(),
+                                ],
+                                Some(status),
+                            )
+                            .await?;
+                            if doc.status >= status {
+                                output.gid = to.with(doc.gid);
+                                output.status = doc.status;
+                                output.updated_at = doc.updated_at;
+                                output.language = to.with(doc.language);
+                                output.title = doc.title;
+                                output.summary = doc.summary;
+                                output.kind = 1;
+                            }
                         }
+                        _ if child.kind == 0 && icreation.gid == user_gid => {
+                            // get for owner
+                            let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
+                            doc.get_one(
+                                &app.scylla,
+                                vec![
+                                    "status".to_string(),
+                                    "title".to_string(),
+                                    "summary".to_string(),
+                                    "updated_at".to_string(),
+                                ],
+                            )
+                            .await?;
+                            if doc.status >= status {
+                                output.gid = to.with(doc.gid);
+                                output.status = doc.status;
+                                output.updated_at = doc.updated_at;
+                                output.language = to.with(doc.language);
+                                output.title = doc.title;
+                                output.summary = doc.summary;
+                                output.kind = 0;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

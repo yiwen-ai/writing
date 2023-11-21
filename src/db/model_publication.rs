@@ -566,6 +566,61 @@ impl Publication {
         Ok(())
     }
 
+    pub async fn get_implicit_one(
+        db: &scylladb::ScyllaDB,
+        gid: xid::Id,
+        cid: xid::Id,
+        language: Language,
+        select_fields: Vec<String>,
+        status: Option<i8>,
+    ) -> anyhow::Result<Publication> {
+        let mut fields = Self::select_fields(select_fields, true)?;
+        let field = "from_language".to_string();
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+
+        let query_size = 200i32;
+        let status = status.unwrap_or(2);
+
+        let query = format!(
+            "SELECT {} FROM publication WHERE gid=? AND cid=? AND status>=? LIMIT ? ALLOW FILTERING USING TIMEOUT 3s",
+            fields.clone().join(","));
+        let params = (gid.to_cql(), cid.to_cql(), status, query_size);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut docs: Vec<Publication> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Publication::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            docs.push(doc);
+        }
+        let mut res: Vec<&Publication> =
+            docs.iter().filter(|doc| doc.language == language).collect();
+        if res.is_empty() {
+            res = docs
+                .iter()
+                .filter(|doc| doc.from_language == doc.language)
+                .collect();
+        }
+        if res.is_empty() {
+            res = docs.iter().collect();
+        }
+        if res.is_empty() {
+            return Err(HTTPError::new(
+                404,
+                format!("Publication not found, gid: {}, cid: {}", gid, cid),
+            )
+            .into());
+        }
+
+        res.sort_by(|a, b| b.version.partial_cmp(&a.version).unwrap());
+        Ok(res.remove(0).to_owned())
+    }
+
     pub async fn batch_get(
         db: &scylladb::ScyllaDB,
         list: Vec<PublicationIndex>,
@@ -1313,7 +1368,7 @@ mod tests {
             )
             .unwrap();
 
-            assert!(creation.save_with(db, content.clone()).await.unwrap());
+            assert!(creation.save_with(db, 0, content.clone()).await.unwrap());
 
             let res = Publication::create_from_creation(db, gid, cid, user).await;
             assert!(res.is_err());
@@ -1594,7 +1649,7 @@ mod tests {
         creation.title = "Hello World".to_string();
         creation.version = 1;
 
-        assert!(creation.save_with(db, content.clone()).await.unwrap());
+        assert!(creation.save_with(db, 0, content.clone()).await.unwrap());
         creation
             .update_status(db, 1i8, creation.updated_at)
             .await
@@ -1613,7 +1668,7 @@ mod tests {
         creation.title = "Hello World 1".to_string();
         creation.version = 1;
 
-        assert!(creation.save_with(db, content.clone()).await.unwrap());
+        assert!(creation.save_with(db, 0, content.clone()).await.unwrap());
         creation
             .update_status(db, 1i8, creation.updated_at)
             .await
@@ -1639,7 +1694,7 @@ mod tests {
             creation.title = format!("Hello World {}", i + 2);
             creation.version = 1;
 
-            assert!(creation.save_with(db, content.clone()).await.unwrap());
+            assert!(creation.save_with(db, 0, content.clone()).await.unwrap());
             creation
                 .update_status(db, 1i8, creation.updated_at)
                 .await
@@ -1702,7 +1757,7 @@ mod tests {
         creation.title = "Hello World".to_string();
         creation.version = 1;
 
-        assert!(creation.save_with(db, content.clone()).await.unwrap());
+        assert!(creation.save_with(db, 0, content.clone()).await.unwrap());
         creation
             .update_status(db, 1i8, creation.updated_at)
             .await

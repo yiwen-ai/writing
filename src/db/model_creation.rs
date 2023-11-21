@@ -327,10 +327,12 @@ impl Creation {
     pub async fn save_with(
         &mut self,
         db: &scylladb::ScyllaDB,
+        price: i64,
         content: Vec<u8>,
     ) -> anyhow::Result<bool> {
         let mut index = CreationIndex::with_pk(self.id);
         index.gid = self.gid;
+        index.price = price;
         index.save(db).await?;
 
         let now = unix_ms() as i64;
@@ -873,8 +875,8 @@ mod tests {
             let err: erring::HTTPError = res.unwrap_err().into();
             assert_eq!(err.code, 404);
 
-            assert!(doc.save_with(db, content.clone()).await.unwrap());
-            let res = doc.save_with(db, content.clone()).await;
+            assert!(doc.save_with(db, 0, content.clone()).await.unwrap());
+            let res = doc.save_with(db, 0, content.clone()).await;
             assert!(res.is_err());
             let err: erring::HTTPError = res.unwrap_err().into(); // can not insert twice
             assert_eq!(err.code, 409);
@@ -1093,7 +1095,7 @@ mod tests {
             let mut doc = Creation::with_pk(gid, xid::new());
             doc.language = Language::Eng;
             doc.title = format!("Hello World {}", i);
-            doc.save_with(db, content.clone()).await.unwrap();
+            doc.save_with(db, 0, content.clone()).await.unwrap();
 
             docs.push(doc)
         }

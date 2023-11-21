@@ -296,6 +296,10 @@ impl Collection {
         if !select_fields.contains(&field) {
             select_fields.push(field);
         }
+        let field = "creation_price".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
 
         if with_pk {
             let field = "day".to_string();

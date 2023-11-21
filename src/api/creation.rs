@@ -209,7 +209,15 @@ pub async fn create(
         ..Default::default()
     };
 
-    let ok = doc.save_with(&app.scylla, input.content.unwrap()).await?;
+    let price = if let Some(ref parent) = parent {
+        parent.creation_price
+    } else {
+        0
+    };
+
+    let ok = doc
+        .save_with(&app.scylla, price, input.content.unwrap())
+        .await?;
     ctx.set("created", ok.into()).await;
 
     let meili_start = ctx.start.elapsed().as_millis() as u64;
