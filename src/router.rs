@@ -70,7 +70,6 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     "/update_status",
                     routing::patch(api::creation::update_status),
                 )
-                .route("/update_price", routing::patch(api::creation::update_price))
                 .route(
                     "/update_content",
                     routing::put(api::creation::update_content).patch(todo),

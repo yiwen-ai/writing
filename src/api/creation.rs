@@ -24,6 +24,8 @@ use super::{
 pub struct CreateCreationInput {
     pub gid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
+    #[validate(range(min = -1, max = 100000))]
+    pub price: Option<i64>,
     #[validate(url)]
     pub original_url: Option<String>,
     pub genre: Option<Vec<String>>,
@@ -156,11 +158,16 @@ pub async fn create(
     ])
     .await;
 
+    let mut price = input.price.unwrap_or(0);
     let parent = if let Some(parent) = input.parent {
         let mut doc = db::Collection::with_pk(*parent);
         doc.get_one(
             &app.scylla,
-            vec!["gid".to_string(), "status".to_string()],
+            vec![
+                "gid".to_string(),
+                "status".to_string(),
+                "creation_price".to_string(),
+            ],
             None,
         )
         .await?;
@@ -187,6 +194,9 @@ pub async fn create(
                 ),
             ));
         }
+        if price == 0 {
+            price = doc.creation_price;
+        }
         Some(doc)
     } else {
         None
@@ -207,12 +217,6 @@ pub async fn create(
         summary: input.summary.unwrap_or_default(),
         license: input.license.unwrap_or_default(),
         ..Default::default()
-    };
-
-    let price = if let Some(ref parent) = parent {
-        parent.creation_price
-    } else {
-        0
     };
 
     let ok = doc
@@ -328,6 +332,8 @@ pub struct UpdateCreationInput {
     pub id: PackObject<xid::Id>,
     pub gid: PackObject<xid::Id>,
     pub updated_at: i64,
+    #[validate(range(min = -1, max = 100000))]
+    pub price: Option<i64>,
     #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
     #[validate(url)]
@@ -369,7 +375,7 @@ impl UpdateCreationInput {
             cols.set_as("license", &license);
         }
 
-        if cols.is_empty() {
+        if cols.is_empty() && self.price.is_none() {
             return Err(HTTPError::new(400, "No fields to update".to_string()).into());
         }
 
@@ -389,41 +395,64 @@ pub async fn update(
     let id = *input.id.to_owned();
     let gid = *input.gid.to_owned();
 
-    let mut doc = db::Creation::with_pk(gid, id);
-    let updated_at = input.updated_at;
-    let cols = input.into()?;
     ctx.set_kvs(vec![
         ("action", "update_creation".into()),
-        ("gid", doc.gid.to_string().into()),
-        ("id", doc.id.to_string().into()),
+        ("gid", gid.to_string().into()),
+        ("id", id.to_string().into()),
     ])
     .await;
 
-    let update_meili = cols.has("title") || cols.has("summary") || cols.has("keywords");
-    let ok = doc.update(&app.scylla, cols, updated_at).await?;
-    ctx.set("updated", ok.into()).await;
+    let mut idoc = db::CreationIndex::with_pk(id);
+    idoc.get_one(&app.scylla).await?;
+    if idoc.gid != gid {
+        return Err(HTTPError::new(
+            403,
+            format!("Creation {} is not belong to group {}", id, gid),
+        ));
+    }
 
-    if update_meili {
-        let meili_start = ctx.start.elapsed().as_millis() as u64;
-        if let Err(err) = app
-            .meili
-            .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
-            .await
-        {
-            log::error!(target: "meilisearch",
-                action = "add_or_update",
-                space = "group",
-                rid = ctx.rid,
-                gid = doc.gid.to_string(),
-                cid = doc.id.to_string(),
-                kind = 0i8,
-                elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
-                "{}", err.to_string(),
-            );
+    if let Some(price) = input.price {
+        if idoc.price < 0 {
+            return Err(HTTPError::new(
+                400,
+                format!("Creation {} is free forever", id),
+            ));
+        }
+
+        idoc.price = price;
+        let _ = idoc.update_field(&app.scylla, "price").await?;
+    }
+
+    let updated_at = input.updated_at;
+    let cols = input.into()?;
+    let mut doc = db::Creation::with_pk(gid, id);
+    if !cols.is_empty() {
+        let update_meili = cols.has("title") || cols.has("summary") || cols.has("keywords");
+        let ok = doc.update(&app.scylla, cols, updated_at).await?;
+        doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
+        ctx.set("updated", ok.into()).await;
+
+        if update_meili {
+            let meili_start = ctx.start.elapsed().as_millis() as u64;
+            if let Err(err) = app
+                .meili
+                .add_or_update(meili::Space::Group(doc.gid), vec![doc.to_meili()])
+                .await
+            {
+                log::error!(target: "meilisearch",
+                    action = "add_or_update",
+                    space = "group",
+                    rid = ctx.rid,
+                    gid = doc.gid.to_string(),
+                    cid = doc.id.to_string(),
+                    kind = 0i8,
+                    elapsed = ctx.start.elapsed().as_millis() as u64 - meili_start;
+                    "{}", err.to_string(),
+                );
+            }
         }
     }
 
-    doc._fields = vec!["updated_at".to_string()]; // only return `updated_at` field.
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
 }
 
@@ -502,53 +531,6 @@ pub async fn update_status(
     ctx.set("updated", ok.into()).await;
     doc._fields = vec!["updated_at".to_string(), "status".to_string()];
     Ok(to.with(SuccessResponse::new(CreationOutput::from(doc, &to))))
-}
-
-#[derive(Debug, Deserialize, Validate)]
-pub struct UpdatePriceInput {
-    pub id: PackObject<xid::Id>,
-    pub gid: PackObject<xid::Id>,
-    #[validate(range(min = -1, max = 100000))]
-    pub price: i64,
-}
-
-pub async fn update_price(
-    State(app): State<Arc<AppState>>,
-    Extension(ctx): Extension<Arc<ReqContext>>,
-    to: PackObject<UpdatePriceInput>,
-) -> Result<PackObject<SuccessResponse<bool>>, HTTPError> {
-    let (to, input) = to.unpack();
-    input.validate()?;
-    valid_user(ctx.user)?;
-
-    let gid = *input.gid.to_owned();
-    let id = *input.id.to_owned();
-
-    ctx.set_kvs(vec![
-        ("action", "update_price".into()),
-        ("gid", gid.to_string().into()),
-        ("id", id.to_string().into()),
-    ])
-    .await;
-    let mut doc = db::CreationIndex::with_pk(id);
-    doc.get_one(&app.scylla).await?;
-    if doc.gid != gid {
-        return Err(HTTPError::new(
-            403,
-            format!("Creation {} is not belong to group {}", id, gid),
-        ));
-    }
-
-    if doc.price < 0 {
-        return Err(HTTPError::new(
-            400,
-            format!("Creation {} is free forever", id),
-        ));
-    }
-
-    doc.price = input.price;
-    let _ = doc.update_field(&app.scylla, "price").await?;
-    Ok(to.with(SuccessResponse::new(true)))
 }
 
 pub async fn delete(
