@@ -789,8 +789,6 @@ pub struct UpdatePublicationInput {
     #[validate(range(min = 1, max = 10000))]
     pub version: i16,
     pub updated_at: i64,
-    #[validate(length(min = 2, max = 16))]
-    pub model: Option<String>,
     #[validate(length(min = 1, max = 256))]
     pub title: Option<String>,
     #[validate(url)]
@@ -804,9 +802,6 @@ pub struct UpdatePublicationInput {
 impl UpdatePublicationInput {
     fn into(self) -> anyhow::Result<ColumnsMap> {
         let mut cols = ColumnsMap::new();
-        if let Some(model) = self.model {
-            cols.set_as("model", &model);
-        }
         if let Some(title) = self.title {
             cols.set_as("title", &title);
         }

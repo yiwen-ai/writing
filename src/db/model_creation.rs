@@ -194,9 +194,17 @@ impl Creation {
         }
 
         let mut select_fields = select_fields;
-        let language = "language".to_string(); // language 字段在 meilisearch 中用作 PK，必须存在
-        if !select_fields.contains(&language) {
-            select_fields.push(language);
+        let field = "language".to_string(); // language 字段在 meilisearch 中用作 PK，必须存在
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
+        let field = "version".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
+        }
+        let field = "status".to_string();
+        if !select_fields.contains(&field) {
+            select_fields.push(field);
         }
 
         if with_pk {

@@ -1081,6 +1081,7 @@ pub async fn list_children(
                                 output.status = doc.status;
                                 output.updated_at = doc.updated_at;
                                 output.language = to.with(doc.language);
+                                output.version = doc.version;
                                 output.title = doc.title;
                                 output.summary = doc.summary;
                                 output.kind = 1;
@@ -1104,6 +1105,7 @@ pub async fn list_children(
                                 output.status = doc.status;
                                 output.updated_at = doc.updated_at;
                                 output.language = to.with(doc.language);
+                                output.version = doc.version;
                                 output.title = doc.title;
                                 output.summary = doc.summary;
                                 output.kind = 0;

@@ -83,12 +83,6 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
         .nest(
             "/v1/publication",
             Router::new()
-                // .nest(
-                //     "/comment",
-                //     Router::new()
-                //         .route("/", routing::post(todo).get(todo).patch(todo).delete(todo))
-                //         .route("/list", routing::post(todo)),
-                // )
                 .route(
                     "/",
                     routing::post(api::publication::create)
