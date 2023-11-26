@@ -1058,9 +1058,7 @@ pub async fn list_children(
                         output.summary = doc.summary;
                         output.cover = doc.cover;
                         output.kind = 1;
-                    }
-
-                    if icreation.gid == user_gid {
+                    } else if icreation.gid == user_gid {
                         // get for owner
                         if let Ok(doc) = db::Publication::get_implicit_one(
                             &app.scylla,
@@ -1083,24 +1081,24 @@ pub async fn list_children(
                                 output.cover = doc.cover;
                                 output.kind = 1;
                             }
-                        }
-
-                        let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
-                        if doc
-                            .get_one(&app.scylla, publication_fields.clone())
-                            .await
-                            .is_ok()
-                            && doc.status >= status
-                        {
-                            output.gid = to.with(doc.gid);
-                            output.status = doc.status;
-                            output.updated_at = doc.updated_at;
-                            output.language = to.with(doc.language);
-                            output.version = doc.version;
-                            output.title = doc.title;
-                            output.summary = doc.summary;
-                            output.cover = doc.cover;
-                            output.kind = 0;
+                        } else {
+                            let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
+                            if doc
+                                .get_one(&app.scylla, publication_fields.clone())
+                                .await
+                                .is_ok()
+                                && doc.status >= status
+                            {
+                                output.gid = to.with(doc.gid);
+                                output.status = doc.status;
+                                output.updated_at = doc.updated_at;
+                                output.language = to.with(doc.language);
+                                output.version = doc.version;
+                                output.title = doc.title;
+                                output.summary = doc.summary;
+                                output.cover = doc.cover;
+                                output.kind = 0;
+                            }
                         }
                     }
                 }
