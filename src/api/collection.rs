@@ -977,6 +977,23 @@ pub async fn list_children(
     });
 
     let mut res: Vec<CollectionChildrenOutput> = Vec::with_capacity(children.len());
+    let collection_fields = vec![
+        "gid".to_string(),
+        "status".to_string(),
+        "rating".to_string(),
+        "info".to_string(),
+        "updated_at".to_string(),
+        "price".to_string(),
+    ];
+    let publication_fields = vec![
+        "language".to_string(),
+        "version".to_string(),
+        "status".to_string(),
+        "title".to_string(),
+        "summary".to_string(),
+        "cover".to_string(),
+        "updated_at".to_string(),
+    ];
 
     for child in children {
         let mut output = CollectionChildrenOutput {
@@ -992,16 +1009,7 @@ pub async fn list_children(
             2 => {
                 let mut doc = db::Collection::with_pk(child.cid);
                 if doc
-                    .get_one(
-                        &app.scylla,
-                        vec![
-                            "gid".to_string(),
-                            "status".to_string(),
-                            "rating".to_string(),
-                            "info".to_string(),
-                        ],
-                        ctx.language,
-                    )
+                    .get_one(&app.scylla, collection_fields.clone(), ctx.language)
                     .await
                     .is_ok()
                     && doc.status >= status
@@ -1026,7 +1034,7 @@ pub async fn list_children(
                     output.rating = icreation.rating;
                     output.price = icreation.price;
 
-                    match db::PublicationIndex::get_implicit_published(
+                    if let Ok(ipub) = db::PublicationIndex::get_implicit_published(
                         &app.scylla,
                         child.cid,
                         db::ZERO_ID,
@@ -1034,84 +1042,66 @@ pub async fn list_children(
                     )
                     .await
                     {
-                        Ok(ipub) => {
-                            let mut doc = db::Publication::with_pk(
-                                ipub.gid,
-                                ipub.cid,
-                                ipub.language,
-                                ipub.version,
-                            );
-                            doc.get_one(
-                                &app.scylla,
-                                vec![
-                                    "status".to_string(),
-                                    "title".to_string(),
-                                    "summary".to_string(),
-                                    "updated_at".to_string(),
-                                ],
-                            )
-                            .await?;
+                        let mut doc = db::Publication::with_pk(
+                            ipub.gid,
+                            ipub.cid,
+                            ipub.language,
+                            ipub.version,
+                        );
+                        doc.get_one(&app.scylla, publication_fields.clone()).await?;
+                        output.gid = to.with(doc.gid);
+                        output.status = 2;
+                        output.updated_at = doc.updated_at;
+                        output.language = to.with(doc.language);
+                        output.version = doc.version;
+                        output.title = doc.title;
+                        output.summary = doc.summary;
+                        output.cover = doc.cover;
+                        output.kind = 1;
+                    }
+
+                    if icreation.gid == user_gid {
+                        // get for owner
+                        if let Ok(doc) = db::Publication::get_implicit_one(
+                            &app.scylla,
+                            icreation.gid,
+                            icreation.id,
+                            language,
+                            publication_fields.clone(),
+                            Some(status),
+                        )
+                        .await
+                        {
+                            if doc.status >= status {
+                                output.gid = to.with(doc.gid);
+                                output.status = doc.status;
+                                output.updated_at = doc.updated_at;
+                                output.language = to.with(doc.language);
+                                output.version = doc.version;
+                                output.title = doc.title;
+                                output.summary = doc.summary;
+                                output.cover = doc.cover;
+                                output.kind = 1;
+                            }
+                        }
+
+                        let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
+                        if doc
+                            .get_one(&app.scylla, publication_fields.clone())
+                            .await
+                            .is_ok()
+                            && doc.status >= status
+                        {
                             output.gid = to.with(doc.gid);
-                            output.status = 2;
+                            output.status = doc.status;
                             output.updated_at = doc.updated_at;
                             output.language = to.with(doc.language);
                             output.version = doc.version;
                             output.title = doc.title;
                             output.summary = doc.summary;
-                            output.kind = 1;
+                            output.cover = doc.cover;
+                            output.kind = 0;
                         }
-                        _ if child.kind == 1 && icreation.gid == user_gid => {
-                            // get for owner
-                            let doc = db::Publication::get_implicit_one(
-                                &app.scylla,
-                                icreation.gid,
-                                icreation.id,
-                                language,
-                                vec![
-                                    "status".to_string(),
-                                    "title".to_string(),
-                                    "summary".to_string(),
-                                    "updated_at".to_string(),
-                                ],
-                                Some(status),
-                            )
-                            .await?;
-                            if doc.status >= status {
-                                output.gid = to.with(doc.gid);
-                                output.status = doc.status;
-                                output.updated_at = doc.updated_at;
-                                output.language = to.with(doc.language);
-                                output.version = doc.version;
-                                output.title = doc.title;
-                                output.summary = doc.summary;
-                                output.kind = 1;
-                            }
-                        }
-                        _ if child.kind == 0 && icreation.gid == user_gid => {
-                            // get for owner
-                            let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
-                            doc.get_one(
-                                &app.scylla,
-                                vec![
-                                    "status".to_string(),
-                                    "title".to_string(),
-                                    "summary".to_string(),
-                                    "updated_at".to_string(),
-                                ],
-                            )
-                            .await?;
-                            if doc.status >= status {
-                                output.gid = to.with(doc.gid);
-                                output.status = doc.status;
-                                output.updated_at = doc.updated_at;
-                                output.language = to.with(doc.language);
-                                output.version = doc.version;
-                                output.title = doc.title;
-                                output.summary = doc.summary;
-                                output.kind = 0;
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }

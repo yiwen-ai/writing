@@ -904,9 +904,12 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(doc3.title.as_str(), "Hello World");
-            assert_eq!(doc3.version, 0);
+            assert_eq!(doc3.version, 1);
             assert_eq!(doc3.language, Language::Eng);
-            assert_eq!(doc3._fields, vec!["gid", "title", "language"]);
+            assert_eq!(
+                doc3._fields,
+                vec!["gid", "title", "language", "version", "status"]
+            );
             assert!(doc3._content.is_empty());
         }
 
