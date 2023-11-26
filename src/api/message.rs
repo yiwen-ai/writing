@@ -19,7 +19,7 @@ use crate::db;
 pub struct CreateMessageInput {
     pub attach_to: PackObject<xid::Id>,
     pub kind: String,
-    #[validate(length(min = 0, max = 512))]
+    #[validate(length(min = 0, max = 4096))]
     pub context: String,
     pub language: PackObject<Language>,
     #[validate(custom = "validate_message")]
@@ -166,7 +166,7 @@ pub struct UpdateMessageInput {
     #[validate(range(min = 1, max = 32767))]
     pub version: i16,
     pub gid: PackObject<xid::Id>,
-    #[validate(length(min = 0, max = 512))]
+    #[validate(length(min = 0, max = 4096))]
     pub context: Option<String>,
     pub language: Option<PackObject<Language>>,
     #[validate(custom = "validate_message")]

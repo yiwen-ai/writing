@@ -25,7 +25,7 @@ use super::{
 pub struct CreateCollectionInput {
     pub gid: PackObject<xid::Id>,
     pub language: PackObject<Language>,
-    #[validate(length(min = 0, max = 1024))]
+    #[validate(length(min = 0, max = 4096))]
     pub context: String,
     pub info: CollectionInfoInput,
     #[validate(url)]
