@@ -1034,31 +1034,7 @@ pub async fn list_children(
                     output.rating = icreation.rating;
                     output.price = icreation.price;
 
-                    if let Ok(ipub) = db::PublicationIndex::get_implicit_published(
-                        &app.scylla,
-                        child.cid,
-                        db::ZERO_ID,
-                        language,
-                    )
-                    .await
-                    {
-                        let mut doc = db::Publication::with_pk(
-                            ipub.gid,
-                            ipub.cid,
-                            ipub.language,
-                            ipub.version,
-                        );
-                        doc.get_one(&app.scylla, publication_fields.clone()).await?;
-                        output.gid = to.with(doc.gid);
-                        output.status = 2;
-                        output.updated_at = doc.updated_at;
-                        output.language = to.with(doc.language);
-                        output.version = doc.version;
-                        output.title = doc.title;
-                        output.summary = doc.summary;
-                        output.cover = doc.cover;
-                        output.kind = 1;
-                    } else if icreation.gid == user_gid {
+                    if icreation.gid == user_gid {
                         // get for owner
                         if let Ok(doc) = db::Publication::get_implicit_one(
                             &app.scylla,
@@ -1100,6 +1076,30 @@ pub async fn list_children(
                                 output.kind = 0;
                             }
                         }
+                    } else if let Ok(ipub) = db::PublicationIndex::get_implicit_published(
+                        &app.scylla,
+                        child.cid,
+                        db::ZERO_ID,
+                        language,
+                    )
+                    .await
+                    {
+                        let mut doc = db::Publication::with_pk(
+                            ipub.gid,
+                            ipub.cid,
+                            ipub.language,
+                            ipub.version,
+                        );
+                        doc.get_one(&app.scylla, publication_fields.clone()).await?;
+                        output.gid = to.with(doc.gid);
+                        output.status = 2;
+                        output.updated_at = doc.updated_at;
+                        output.language = to.with(doc.language);
+                        output.version = doc.version;
+                        output.title = doc.title;
+                        output.summary = doc.summary;
+                        output.cover = doc.cover;
+                        output.kind = 1;
                     }
                 }
             }
