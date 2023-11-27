@@ -933,6 +933,8 @@ pub struct CollectionChildrenOutput {
     pub version: i16,
     pub title: String,
     pub summary: String,
+    pub keywords: Vec<String>,
+    pub authors: Vec<String>,
 }
 
 pub async fn list_children(
@@ -993,6 +995,8 @@ pub async fn list_children(
         "summary".to_string(),
         "cover".to_string(),
         "updated_at".to_string(),
+        "keywords".to_string(),
+        "authors".to_string(),
     ];
 
     for child in children {
@@ -1020,6 +1024,8 @@ pub async fn list_children(
                         output.language = to.with(lang);
                         output.title = info.title;
                         output.summary = info.summary;
+                        output.keywords = info.keywords.unwrap_or_default();
+                        output.authors = info.authors.unwrap_or_default();
                     }
                     output.gid = to.with(doc.gid);
                     output.rating = doc.rating;
@@ -1056,6 +1062,8 @@ pub async fn list_children(
                                 output.summary = doc.summary;
                                 output.cover = doc.cover;
                                 output.kind = 1;
+                                output.keywords = doc.keywords;
+                                output.authors = doc.authors;
                             }
                         } else {
                             let mut doc = db::Creation::with_pk(icreation.gid, icreation.id);
@@ -1074,6 +1082,8 @@ pub async fn list_children(
                                 output.summary = doc.summary;
                                 output.cover = doc.cover;
                                 output.kind = 0;
+                                output.keywords = doc.keywords;
+                                output.authors = doc.authors;
                             }
                         }
                     } else if let Ok(ipub) = db::PublicationIndex::get_implicit_published(
@@ -1100,6 +1110,8 @@ pub async fn list_children(
                         output.summary = doc.summary;
                         output.cover = doc.cover;
                         output.kind = 1;
+                        output.keywords = doc.keywords;
+                        output.authors = doc.authors;
                     }
                 }
             }
