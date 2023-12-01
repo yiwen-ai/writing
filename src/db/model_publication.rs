@@ -851,7 +851,7 @@ impl Publication {
             .into());
         }
 
-        if self.status != 0 {
+        if self.status < 0 {
             return Err(HTTPError::new(
                 409,
                 format!("Publication can not be update, status {}", self.status),

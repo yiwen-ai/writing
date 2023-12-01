@@ -288,7 +288,7 @@ impl Message {
         cols: ColumnsMap,
         version: i16,
     ) -> anyhow::Result<bool> {
-        let valid_fields = ["context"];
+        let valid_fields = ["context", "languages"];
         let update_fields = cols.keys();
         for field in &update_fields {
             if !valid_fields.contains(&field.as_str()) {

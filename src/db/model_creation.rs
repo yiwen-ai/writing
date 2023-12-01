@@ -569,7 +569,7 @@ impl Creation {
             )
             .into());
         }
-        if self.status < 0 || self.status > 1 {
+        if self.status < 0 {
             return Err(HTTPError::new(
                 409,
                 format!("Creation can not be update, status {}", self.status),

@@ -4,7 +4,11 @@ use axum::{
 };
 use isolang::Language;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, convert::From, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::From,
+    sync::Arc,
+};
 use validator::{Validate, ValidationError};
 
 use axum_web::context::ReqContext;
@@ -169,6 +173,7 @@ pub struct UpdateMessageInput {
     #[validate(length(min = 0, max = 4096))]
     pub context: Option<String>,
     pub language: Option<PackObject<Language>>,
+    pub languages: Option<Vec<PackObject<Language>>>,
     #[validate(custom = "validate_message")]
     pub message: Option<PackObject<Vec<u8>>>,
 }
@@ -178,6 +183,10 @@ impl UpdateMessageInput {
         let mut cols = ColumnsMap::new();
         if let Some(context) = self.context {
             cols.set_as("context", &context);
+        }
+        if let Some(languages) = self.languages {
+            let languages: HashSet<Language> = languages.into_iter().map(|v| v.unwrap()).collect();
+            cols.set_as("languages", &languages);
         }
 
         if cols.is_empty() {
@@ -219,7 +228,7 @@ pub async fn update(
     }
 
     let mut ok = false;
-    if input.context.is_some() {
+    if input.context.is_some() || input.languages.is_some() {
         let cols = input.clone().into()?;
         ok = doc.update(&app.scylla, cols, version).await?;
     }
