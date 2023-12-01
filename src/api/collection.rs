@@ -17,7 +17,7 @@ use scylla_orm::ColumnsMap;
 
 use super::{
     get_fields, message, token_from_xid, token_to_xid, AppState, GIDPagination, IDGIDPagination,
-    QueryGidCid, QueryGidId, QueryGidIdCid, QueryId, RFPInfo, SubscriptionInput,
+    Pagination, QueryGidCid, QueryGidId, QueryGidIdCid, QueryId, RFPInfo, SubscriptionInput,
     SubscriptionOutput, UpdateStatusInput, RFP,
 };
 
@@ -368,6 +368,37 @@ pub async fn list(
         next_page_token: to.with_option(token_from_xid(res.1)),
         result: res
             .0
+            .iter()
+            .map(|r| CollectionOutput::from(r.to_owned(), &to))
+            .collect(),
+    }))
+}
+
+pub async fn list_latest(
+    State(app): State<Arc<AppState>>,
+    Extension(ctx): Extension<Arc<ReqContext>>,
+    to: PackObject<Pagination>,
+) -> Result<PackObject<SuccessResponse<Vec<CollectionOutput>>>, HTTPError> {
+    let (to, input) = to.unpack();
+    input.validate()?;
+    valid_user(ctx.user)?;
+
+    ctx.set_kvs(vec![("action", "list_latest_collections".into())])
+        .await;
+
+    let fields = input.fields.unwrap_or_default();
+    let (res, next_page_token) = db::Collection::list_latest(
+        &app.scylla,
+        fields,
+        token_to_xid(&input.page_token),
+        ctx.language,
+    )
+    .await?;
+
+    Ok(to.with(SuccessResponse {
+        total_size: None,
+        next_page_token: to.with_option(token_from_xid(next_page_token)),
+        result: res
             .iter()
             .map(|r| CollectionOutput::from(r.to_owned(), &to))
             .collect(),

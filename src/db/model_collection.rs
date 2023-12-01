@@ -799,7 +799,7 @@ impl Collection {
 
         let mut res: Vec<Self> = Vec::new();
         let query = format!(
-                "SELECT {} FROM collection WHERE day=? AND status=2 LIMIT 1000 ALLOW FILTERING USING TIMEOUT 3s",
+                "SELECT {} FROM collection WHERE day=? AND status=2 LIMIT 100 ALLOW FILTERING USING TIMEOUT 3s",
                 fields.clone().join(",")
             );
 
@@ -809,7 +809,7 @@ impl Collection {
             (unix_ms() / (1000 * 3600 * 24)) as i32
         };
 
-        let min = (unix_ms() / (1000 * 3600 * 24)) as i32 - 30;
+        let min = (unix_ms() / (1000 * 3600 * 24)) as i32 - 90;
         while day > min {
             let params = (day,);
             let rows = db.execute_iter(query.as_str(), params).await?;
@@ -822,7 +822,7 @@ impl Collection {
                 res.push(doc);
             }
 
-            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            if (page_token.is_none() && res.len() >= 2) || (page_token.is_some() && res.len() >= 1)
             {
                 break;
             }

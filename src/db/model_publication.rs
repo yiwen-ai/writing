@@ -149,7 +149,7 @@ impl PublicationIndex {
             }
 
             // result should >= 6 for first page.
-            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            if (page_token.is_none() && res.len() >= 2) || (page_token.is_some() && res.len() >= 1)
             {
                 let next_id = res.last().unwrap().cid;
                 res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());
@@ -178,7 +178,7 @@ impl PublicationIndex {
 
         let mut res: Vec<PublicationIndex> = Vec::new();
         let query = format!(
-            "SELECT {} FROM pub_index WHERE day=? AND gid=? LIMIT 1000 USING TIMEOUT 3s",
+            "SELECT {} FROM pub_index WHERE day=? AND gid=? LIMIT 100 USING TIMEOUT 3s",
             fields.clone().join(",")
         );
 
@@ -189,7 +189,7 @@ impl PublicationIndex {
         };
 
         let mut i = 0i8;
-        while day > 0 && i < 30 {
+        while day > 0 && i < 90 {
             for gid in gids.iter() {
                 if gid <= &MIN_ID {
                     continue;
@@ -197,6 +197,7 @@ impl PublicationIndex {
 
                 let params = (day, gid.to_cql());
                 let rows = db.execute_iter(query.as_str(), params).await?;
+                let mut c = 0i8;
                 for row in rows {
                     let mut doc = PublicationIndex::default();
                     let mut cols = ColumnsMap::with_capacity(fields.len());
@@ -205,10 +206,12 @@ impl PublicationIndex {
                     doc._fields = fields.clone();
                     if res.is_empty() {
                         res.push(doc);
+                        c += 1;
                     } else {
                         let prev = res.last_mut().unwrap();
                         if prev.cid != doc.cid {
                             res.push(doc);
+                            c += 1;
                         } else if prev.language != doc.language {
                             match language {
                                 // prefer language match
@@ -219,11 +222,16 @@ impl PublicationIndex {
                             }
                         }
                     }
+
+                    // docs <= 5 for every group.
+                    if c >= 5 {
+                        break;
+                    }
                 }
             }
 
-            // result should >= 6 for first page.
-            if (page_token.is_none() && res.len() >= 6) || (page_token.is_some() && res.len() >= 3)
+            // result should >= 2 for first page.
+            if (page_token.is_none() && res.len() >= 2) || (page_token.is_some() && res.len() >= 1)
             {
                 let next_id = res.last().unwrap().cid;
                 res.sort_by(|a, b| b.cid.partial_cmp(&a.cid).unwrap());

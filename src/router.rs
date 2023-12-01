@@ -104,6 +104,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                     "/list_by_gids",
                     routing::post(api::publication::list_by_gids),
                 )
+                .route("/list_latest", routing::post(api::publication::list_latest))
                 .route(
                     "/update_status",
                     routing::patch(api::publication::update_status),
@@ -166,6 +167,7 @@ pub async fn new(cfg: conf::Conf) -> anyhow::Result<(Arc<api::AppState>, Router)
                         .delete(api::collection::remove_child),
                 )
                 .route("/list", routing::post(api::collection::list))
+                .route("/list_latest", routing::post(api::collection::list_latest))
                 .route(
                     "/list_children",
                     routing::post(api::collection::list_children),
