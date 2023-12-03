@@ -549,7 +549,7 @@ pub async fn update_info(
 
     let mut info = db::Message::with_pk(doc.mid);
     let mut ok = false;
-    if input.context.is_some() {
+    if input.context.is_some() || input.languages.is_some() {
         let cols = input.clone().into()?;
         ok = info.update(&app.scylla, cols, version).await?;
     }
